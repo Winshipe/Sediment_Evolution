@@ -1,0 +1,413 @@
+---
+title: "figures_for_popgroup"
+output: html_document
+date: "2024-12-06"
+---
+
+Other people running this will need to adapt all the paths to various files (all available on github), shouldn't be too bad though
+
+```{r}
+library(tidyverse)
+library(gridExtra)
+library(grid)
+```
+
+
+
+```{r}
+raw_genome_1 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_1_genome_info.tsv",delim="\t") %>% mutate(reads_source = 1)
+raw_genome_3 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_3_genome_info.tsv",delim="\t") %>% mutate(reads_source = 3)
+raw_genome_7 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_7_genome_info.tsv",delim="\t") %>% mutate(reads_source = 7)
+raw_genome_10 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_10_genome_info.tsv",delim="\t") %>% mutate(reads_source = 10)
+raw_genome_25 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_25_genome_info.tsv",delim="\t") %>% mutate(reads_source = 25)
+raw_genome_M5_3 <- rbind(raw_genome_1, raw_genome_3, raw_genome_7, raw_genome_10, raw_genome_25)
+```
+
+
+
+lifestyle plus phylo joins the MAG name with some limited taxonomy and also an "eye-balled" categorization of what lifestyle (surface, generalist, subsurface) that MAG subscribes to 
+```{r}
+lifestyle_plus_phylo <- read_delim("~/Projects/Sediments/lifestyles.tsv",delim="\t")
+```
+```{r}
+raw_genome_M5_3 <- left_join(raw_genome_M5_3 %>% mutate(genome = gsub(".filtered.fa","", gsub("refs/","", genome))), lifestyle_plus_phylo)
+```
+
+
+```{r}
+raw_genome_M5_3 %>% ggplot(aes(x=factor(reads_source), y=coverage, color=genome)) + geom_point(size=2.5) + theme_bw() + theme(text=element_text(size=22)) + labs(x="Reads Source (CmBSF)", color="MAG")
+```
+```{r}
+#raw_genome_M5_3 %>% ggplot(aes(x=factor(reads_source), y=coverage, color=genome)) + geom_point() + theme_bw() + theme(text=element_text(size=22)) + labs(x="Reads Source (CmBSF)", color="MAG")
+```
+
+proc genes -> filtered plus normalized
+```{r}
+proc_genes_1 <- read_delim("~/Projects/Sediments/all_depths/IS_proc_M5_3_1_gene_info.tsv",delim="\t")%>% mutate(reads_source = 1)
+proc_genes_3 <- read_delim("~/Projects/Sediments/all_depths/IS_proc_M5_3_3_gene_info.tsv",delim="\t")%>% mutate(reads_source = 3)
+proc_genes_7 <- read_delim("~/Projects/Sediments/all_depths/IS_proc_M5_3_7_gene_info.tsv",delim="\t")%>% mutate(reads_source = 7)
+proc_genes_10 <- read_delim("~/Projects/Sediments/all_depths/IS_proc_M5_3_7_gene_info.tsv",delim="\t")%>% mutate(reads_source = 10)
+proc_genes_25 <- read_delim("~/Projects/Sediments/all_depths/IS_proc_M5_3_7_gene_info.tsv",delim="\t")%>% mutate(reads_source = 25)
+
+proc_genes <- rbind(proc_genes_1, proc_genes_3, proc_genes_7, proc_genes_10, proc_genes_25)
+```
+
+
+This next plot
+
+
+```{r}
+genes_3_v_25 <- proc_genes %>%
+  filter((reads_source == 3) | (reads_source == 25)) %>%
+  select(scaffold, gene,reads_source, coverage, pNpS_variants) %>% 
+  pivot_wider(names_from = reads_source, values_from = c(coverage, pNpS_variants))
+```
+
+```{r}
+genes_3_v_25 %>% ggplot(aes(x=log10(coverage_3+0.01), y=log10(coverage_25+0.01)))+
+  geom_hex() +
+  geom_hline(yintercept = log10(5), color="red",linetype="dotted",linewidth=1) +
+  geom_vline(xintercept = log10(5),color="red",linetype="dotted",linewidth=1 ) + 
+  scale_fill_continuous(high="darkblue",low="lightblue") + 
+  theme_bw()
+```
+
+```{r}
+stb <- read_delim("~/Projects/Sediments/all_depths/combined_reference_M5_3.stb",delim="\t",col_names = c("scaffold","genome")) %>% mutate(genome = gsub(".filtered.fa","", genome))
+head(stb)
+genes_3_v_25 <- left_join(genes_3_v_25, stb)
+```
+```{r}
+genes_3_v_25 <- left_join(genes_3_v_25,lifestyle_plus_phylo)
+```
+
+```{r}
+attempt_1 <- genes_3_v_25 %>% filter((coverage_3 > 5) & (coverage_25 > 5)) %>% 
+ # group_by(lifestyle) %>% 
+#  reframe(
+  ggplot(data=., aes(x=pNpS_variants_25, y=pNpS_variants_3)) +
+    geom_hex() +
+    xlim(0,1) +
+    ylim(0,1) +
+    theme_bw() + 
+    guides(fill = guide_colourbar(title.position = "top")) +
+    scale_fill_continuous(aes(
+      high=ifelse(
+        lifestyle == "Surface Specialist",
+        "#E97132",
+        ifelse(
+          lifestyle == "Generalist",
+          "#595959",
+          "#156082"
+        )
+      ),
+      low=ifelse(
+        lifestyle=="Surface specialist",
+       "#f8cfba",
+       ifelse(
+         lifestyle =="Generalist",
+          "#d9d9d9",
+          "#bde3f4")
+       ))) +
+    facet_wrap(~lifestyle)
+ # ) %>% .$subplot %>% arrangeGrob(grobs = ., nrow = 1) %>% grid.arrange()
+```
+
+
+This plot uses IS's pN/pS rather than theta-hat-N theta-hat-S
+
+```{r}
+surface_subplot <- genes_3_v_25 %>% filter((coverage_3 > 5) & (coverage_25 > 5)) %>% 
+  filter(lifestyle =="Surface Specialist") %>%
+  ggplot(aes(x=pNpS_variants_25, y=pNpS_variants_3)) +
+    geom_hex() +
+    xlim(0,1) +
+    ylim(0,1) +
+    theme_bw() + 
+    coord_fixed() + 
+    geom_abline(slope=1, intercept=0, color="red",linewidth=1) +
+    guides(fill = guide_colourbar(title.position = "top")) +
+    scale_fill_continuous(
+      high="#E97132",
+      low= "#f8cfba",
+      ) +
+    theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        legend.position="none",
+        text=element_text(size=22)) +
+  labs(title="Surface Specialists")
+
+# +
+  #  facet_wrap(~lifestyle)
+generalist_subplot <- genes_3_v_25 %>% filter((coverage_3 > 5) & (coverage_25 > 5)) %>% 
+  filter(lifestyle =="Generalist") %>%
+  ggplot(aes(x=pNpS_variants_25, y=pNpS_variants_3)) +
+    geom_hex() +
+    xlim(0,1) +
+    ylim(0,1) +
+    theme_bw() + 
+    coord_fixed() + 
+  geom_abline(slope=1, intercept=0, color="red",linewidth=1) +
+    guides(fill = guide_colourbar(title.position = "top")) +
+    scale_fill_continuous(
+      high="#595959",
+      low= "#d9d9d9",
+      ) +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        legend.position="none",
+        text=element_text(size=22)) +
+  labs(title="Generalists")
+subsurface_subplot <- genes_3_v_25 %>% filter((coverage_3 > 5) & (coverage_25 > 5)) %>% 
+  filter(lifestyle =="Subsurface Specialist") %>%
+  ggplot(aes(x=pNpS_variants_25, y=pNpS_variants_3)) +
+    geom_hex() +
+    xlim(0,1) +
+    ylim(0,1) +
+    theme_bw() + 
+  geom_abline(slope=1, intercept=0, color="red",linewidth=1) +
+  coord_fixed() + 
+    guides(fill = guide_colourbar(title.position = "top")) +
+    scale_fill_continuous(
+      high="#156082",
+      low= "#bde3f4",
+      ) +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        legend.position="none",
+        text=element_text(size=22)) +
+  labs(title="Subsurface Specialists")
+
+grid.arrange(surface_subplot, generalist_subplot, subsurface_subplot,nrow=2, bottom=textGrob("pN/pS 25cm", gp=gpar(fontsize=22)),left=textGrob("pN/pS 3cm",gp=gpar(fontsize=22),rot=90))
+```
+```{r}
+raw_genome_M5_3 %>% ggplot(aes(x=genome, y=factor(reads_source), fill=log10(coverage))) + geom_tile(width=0.9) + scale_fill_continuous(high="#79206f",low="#f4d7f1")  + scale_x_discrete(guide = guide_axis(angle = 60)) + theme(axis.title = element_text(size=22), legend.title = element_text(size=22),axis.text.x = element_blank(), axis.text.y=element_text(size=20)) + labs(x="MAGs", y="Reads Source (CmBSF)") + scale_y_discrete(limits=rev)
+```
+
+```{r}
+rg_w_theta <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat.tsv",delim="\t")
+head(rg_w_theta)
+```
+```{r}
+rg_w_theta <- rg_w_theta %>% mutate(theta_ns = theta_n / theta_s)
+```
+
+```{r}
+rg_w_theta_325 <- rg_w_theta %>% filter((reads_source == 3) | (reads_source == 25)) %>% select(MAG, gene,  scaffold, reads_source, coverage, theta_ns) %>% pivot_wider(names_from = reads_source, values_from = c(theta_ns, coverage))
+rg_w_theta_325 <- left_join(rg_w_theta_325 %>% mutate(genome = gsub(".filtered.fa","", gsub("refs/","", MAG))), lifestyle_plus_phylo)
+```
+
+
+This plot here is theta-hat-N / theta-hat-S by depth 
+
+```{r}
+surface_subplot_theta <- rg_w_theta_325 %>% filter((coverage_3 > 5) & (coverage_25 > 5)) %>% 
+  filter(lifestyle =="Surface Specialist") %>%
+  ggplot(aes(x=theta_ns_25, y=theta_ns_3)) +
+    geom_hex() +
+    xlim(0,1) +
+    ylim(0,1) +
+    theme_bw() + 
+    coord_fixed() + 
+    geom_abline(slope=1, intercept=0, color="black",linewidth=1, linetype="dotted") +
+    guides(fill = guide_colourbar(title.position = "top")) +
+    scale_fill_continuous(
+      high="#e76118",
+      low= "#f8cfba",
+      ) +
+    theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+       # legend.position="none",
+        text=element_text(size=22)) +
+  labs(title="Surface Specialists")
+
+# +
+  #  facet_wrap(~lifestyle)
+generalist_subplot_theta <- rg_w_theta_325 %>% filter((coverage_3 > 5) & (coverage_25 > 5)) %>% 
+  filter(lifestyle =="Generalist") %>%
+  ggplot(aes(x=theta_ns_25, y=theta_ns_3)) +
+    geom_hex() +
+    xlim(0,1) +
+    ylim(0,1) +
+    theme_bw() + 
+    coord_fixed() + 
+  geom_abline(slope=1, intercept=0, color="black",linewidth=1, linetype="dotted") +
+    guides(fill = guide_colourbar(title.position = "top")) +
+    scale_fill_continuous(
+      high="#494949",
+      low= "#d9d9d9",
+      ) +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        #legend.position="none",
+        text=element_text(size=22)) +
+  labs(title="Generalists")
+subsurface_subplot_theta <- rg_w_theta_325  %>% filter((coverage_3 > 5) & (coverage_25 > 5)) %>% 
+  filter(lifestyle =="Subsurface Specialist") %>%
+  ggplot(aes(x=theta_ns_25, y=theta_ns_3)) +
+    geom_hex() +
+    xlim(0,1) +
+    ylim(0,1) +
+    theme_bw() + 
+  geom_abline(slope=1, intercept=0, color="black",linewidth=1, linetype="dotted") +
+  coord_fixed() + 
+    guides(fill = guide_colourbar(title.position = "top")) +
+    scale_fill_continuous(
+      high="#12516e",
+      low= "#bde3f4",
+      ) +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+       # legend.position="none",
+        text=element_text(size=22)) +
+  labs(title="Subsurface Specialists")
+
+grid.arrange(surface_subplot_theta, generalist_subplot_theta, subsurface_subplot_theta,nrow=2, bottom=textGrob("\U03B8N / \U03B8S 25cm", gp=gpar(fontsize=22)),left=textGrob("\U03B8N / \U03B8S 3cm",gp=gpar(fontsize=22),rot=90))
+```
+
+This next plot is theta-hat-N/theta-hat-S for all depths.  The hypothesis here is that maybe 7 & 10cmbsf have relaxed selection/positive selection as they transition from the oxygenated surface sediments to the anoxic/micro-oxic subsurface regime
+
+
+```{r}
+rg_w_theta <- left_join(rg_w_theta %>% mutate(genome = gsub(".filtered.fa","", gsub("refs/","", MAG))), lifestyle_plus_phylo)
+
+rg_w_theta %>% filter(coverage > 5) %>% ggplot(aes(x=genome, y=log10(theta_ns+0.01), color=factor(reads_source))) + geom_boxplot() + facet_wrap(~lifestyle,scales="free_x") + theme_bw() + labs(y="log10 \U03B8N / \U03B8S + 0.01", color="CmBSF")
+
+```
+
+
+This section creates rg_w_theta_sum (rg -> raw genes, sum -> summary, that is by MAG) and the same but in even/odd codon form (even/odd -> eo).  The rest of these plots are pretty self explanatory for a bit
+
+```{r}
+
+rg_w_theta_sum <- rg_w_theta %>% group_by(MAG, reads_source, lifestyle) %>% filter(coverage > 5) %>% filter(theta_ns != Inf) %>% summarise(
+  theta_s_mean = mean(theta_s, na.rm=T),
+  theta_s_median = median(theta_s, na.rm=T),
+  theta_ns_mean = mean(theta_ns, na.rm=T),
+  theta_ns_median = median(theta_ns, na.rm=T),
+  n = n()
+)
+rg_w_theta_sum_eo <- left_join(
+  rg_w_theta %>% group_by(MAG, reads_source, lifestyle) %>% filter(coverage > 5) %>% filter(theta_ns != Inf) %>%
+  filter((start %% 2 ) == 0) %>% #even numbered starts -> theta-hat S, odd numbered starts -> theta-hat NS
+  summarise(
+    theta_s_mean = mean(theta_s, na.rm=T),
+    theta_s_median = median(theta_s, na.rm=T),
+  ),
+  rg_w_theta %>% group_by(MAG, reads_source, lifestyle) %>% filter(coverage > 5) %>% filter(theta_ns != Inf) %>%
+  filter((start %% 2 ) == 1) %>%
+  summarise(
+    theta_ns_mean = mean(theta_ns, na.rm=T),
+    theta_ns_median = median(theta_ns, na.rm=T),
+    n = n()
+  ),
+  by = join_by(MAG, reads_source, lifestyle)
+  
+)
+
+```
+```{r}
+rg_w_theta_sum %>% ggplot(aes(x=theta_s_mean, y=log(theta_ns_mean))) + geom_point(aes(size=log10(n))) + labs(y="Natural Log \U03B8N / \U03B8S ", x="\U03B8S", size="Log10 \n # of genes") + theme(text=element_text(size=22)) + theme_bw() + geom_smooth(method="lm", se=F, color="black")
+
+```
+
+
+```{r}
+rg_w_theta_sum %>% ggplot(aes(x=log(theta_s_mean), y=log(theta_ns_mean))) + geom_point(aes(size=log10(n))) + labs(y="Natural Log \U03B8N / \U03B8S ", x="Natural Log \U03B8S", size="Log10 \n # of genes") + theme(text=element_text(size=22)) + theme_bw() + geom_smooth(method="lm", se=F, color="black")
+
+rg_w_theta_sum_eo %>% ggplot(aes(x=log(theta_s_mean), y=log(theta_ns_mean))) + geom_point(aes(size=log10(n))) + labs(y="Natural Log \U03B8N / \U03B8S Odd positions ", x="Natural Log \U03B8S Even positions", size="Log10 \n # of genes") + theme(text=element_text(size=22)) + theme_bw() + geom_smooth(method="lm", se=F, color="black")
+```
+
+```{r}
+rg_w_theta_sum_eo %>% ggplot(aes(x=log(theta_s_mean), y=log(theta_ns_mean), color=factor(reads_source))) + geom_point(aes(size=log10(n))) + labs(y="Natural Log \U03B8N / \U03B8S Odd positions ", x="Natural Log \U03B8S Even positions", size="Log10 \n # of genes") + theme(text=element_text(size=22)) + theme_bw() + geom_smooth(method="lm", se=F)
+```
+
+
+```{r}
+rg_w_theta_sum %>% ggplot(aes(x=theta_s_mean, y=log(theta_ns_mean), size=log10(n))) + geom_point() + labs(y="Natural Log ( \U03B8N / \U03B8S ) ", x="\U03B8S", size="Log10 \n # of genes") + theme(text=element_text(size=22)) + facet_wrap(~reads_source) 
+```
+
+```{r}
+ rg_w_theta_sum %>% group_by(reads_source) %>% summarise(p_val = summary(lm(data=cur_data(), formula=log(theta_ns_mean) ~ theta_s_mean))[["coefficients"]][2,4],r2 = summary(lm(data=cur_data(), formula=log(theta_ns_mean) ~ theta_s_mean))$r.squared)
+```
+
+```{r}
+rg_w_theta_sum %>% ggplot(aes(x=theta_s_mean, y=log(theta_ns_mean), size=log10(n), shape=factor(reads_source), color=MAG)) + geom_point() + labs(y="Natural Log ( \U03B8N / \U03B8S ) ", x="\U03B8S", size="Log10 \n # of genes") + theme(text=element_text(size=22)) + facet_wrap(~lifestyle) 
+
+```
+Gillaume plot
+```{r}
+rg_w_theta %>% group_by(MAG, reads_source) %>% filter(gene_length > 500 & gene_length < 2000) %>% filter(coverage > 5) %>% summarise(mag_pi_S = sum(SNV_S_count), mag_pi_N = sum(SNV_N_count), n=n()) %>% ggplot(aes(x=mag_pi_S, y=mag_pi_N)) + geom_point(aes(size=log10(n), color=MAG, shape=factor(reads_source))) + labs(x="MAG S count",y="MAG N count",size="log10 # of genes") + theme(text=element_text(size=24)) + theme_bw() + coord_fixed()
+```
+
+Just a brief experiment into if we can cluster genes into nice clusters with multiple members (for most, not really)
+```{r}
+annotations_M5 <- read_delim("~/Projects/Sediments/all_depths/combined_annotations.txt",delim="\t",comment="#")
+head(annotations_M5)
+```
+```{r}
+annotations_M5 %>% summarise(n(), sum(Preferred_name != "-"), sum(KEGG_ko != "-"), sum(PFAMs != "-"))
+```
+
+
+
+How many genes per MAG per depth are under positive selection?  The threshold here is up for some debate.  IS doesn't report pNpS if there's not sufficient variants so I just use whether they report pNpS as a crude filter 
+
+
+```{r}
+left_join(rg_w_theta, annotations_M5, join_by(gene == query)) %>% filter((KEGG_ko != "-") & (!is.na(pNpS_variants)) & (coverage > 5)) %>% ggplot(aes(x=theta_ns)) + geom_histogram(bins=100) + xlim(0,5)
+```
+```{r}
+left_join(rg_w_theta, annotations_M5, join_by(gene == query)) %>% filter((KEGG_ko != "-") & (!is.na(pNpS_variants)) & (coverage > 5)) %>% ggplot(aes(x=theta_ns)) + geom_histogram(binwidth=0.05) + xlim(0.5,2) + geom_vline(xintercept = 1.4, linetype="dotted",color="red")
+```
+
+```{r}
+genes_under_positive_selection_M5 <- left_join(rg_w_theta, annotations_M5, join_by(gene == query)) %>% filter((KEGG_ko != "-") & (!is.na(pNpS_variants)) & (coverage > 5))
+
+genes_under_positive_selection_M5 <- genes_under_positive_selection_M5 %>% mutate(pos_sel = theta_ns > 1.4) %>% group_by( MAG, reads_source) %>% summarise(n_genes = n(),  n_pos_sel = sum(pos_sel, na.rm=T)) %>% mutate(pos_sel_fr = n_pos_sel / n_genes )
+```
+
+
+
+```{r}
+left_join(genes_under_positive_selection_M5 , raw_genome_M5_3 %>% select(genome, length) %>% distinct(genome, length) %>% mutate(MAG = gsub("refs/","", genome)), join_by(MAG == MAG)) %>% group_by( MAG, reads_source) %>% ggplot(aes(x=factor(reads_source), y=pos_sel_fr, color=log10(length))) + geom_point() + facet_wrap(~MAG) + theme_bw()
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+lill_tax <- read.table("~/Downloads/raw_data_16s/Lilian_ASV_table_taxonomy.txt",sep="\t",header=T)
+lill_tax <- lill_tax %>% mutate(domain_phyla = paste0(DOMAIN,"_",Phylum))
+head(lill_tax)
+```
+```{r}
+lill_tax2 <- lill_tax %>%
+  pivot_longer(cols = starts_with("M"),names_to = "name", values_to = "count") %>%
+  separate_wider_delim(cols="name",delim="_",names=c("Site","Replicate","Depth","Type")) %>% 
+  mutate(Depth = as.numeric(gsub("x",".", Depth))) %>% 
+  mutate(domain_phyla = ifelse(DOMAIN == "Archaea", "All Archaea",Phylum))
+```
+
+```{r}
+top_phyla <- lill_tax2 %>% filter(Site == "M5",Type =="DNA") %>% group_by(domain_phyla) %>%  summarise(dna_sum = sum(count)) %>% top_n( 11)
+read_totals <- lill_tax2 %>% group_by(Depth, Type, Site, Replicate) %>% summarise(read_total = sum(count))
+lill_tax2 <- left_join(lill_tax2, read_totals)
+
+color_brewer_w_gray <- c("#a6cee3","#1f78b4","#b2df8a","#33a02c","#fb9a99","#e31a1c","#fdbf6f","#aaaaaa","#ff7f00","#cab2d6","#6a3d9a","#ffff99","#b15928")
+color_brewer <- c("#a6cee3","#1f78b4","#b2df8a","#33a02c","#fb9a99","#e31a1c","#fdbf6f","#ff7f00","#cab2d6","#6a3d9a","#ffff99","#b15928")
+lill_tax2 %>% filter((Site == "M5") & (Type == "RNA") & (domain_phyla %in% top_phyla$domain_phyla)) %>% group_by(domain_phyla,Depth) %>% summarise(rna_count = sum(count)) %>% uncount(rna_count) %>% ggplot(aes(x=Depth,fill=domain_phyla)) + geom_bar() + labs(x="Cm Below Seafloor",y="16S RNA read count",fill="Phylum") + theme_bw() + scale_fill_manual(values=color_brewer) + geom_vline(xintercept = 6.5, linetype="dotted",color="black") + theme(text=element_text(family="Helvetica",size=22)) 
+
+```
+
+```{r}
+lill_tax2 %>% mutate(domain_phyla = ifelse(domain_phyla %in% top_phyla$domain_phyla, domain_phyla, "Other Bacteria")) %>% filter((Site == "M5") & (Type == "RNA") & ((domain_phyla %in% top_phyla$domain_phyla)|(domain_phyla == "Other Bacteria"))) %>% group_by(domain_phyla,Depth, read_total) %>% summarise(phyla_reads = sum(count)) %>% mutate(phyla_relabs = phyla_reads / read_total) %>% ggplot(aes(x=Depth,y=phyla_relabs, fill=domain_phyla)) + geom_bar(stat="identity") + labs(x="Cm Below Seafloor",y="16S RNA rel. abd.",fill="Phylum") + theme_bw() + scale_fill_manual(values=color_brewer_w_gray) + geom_vline(xintercept = 6.5, linetype="dotted",color="black") + theme(text=element_text(family="Helvetica",size=22)) 
+```
+
