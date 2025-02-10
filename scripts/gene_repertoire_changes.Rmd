@@ -9,16 +9,24 @@ date: "2025-01-29"
 library(tidyverse)
 library(qvalue)
 ```
-
+InStrain values plus my own calculation of Pn/Ps and theta-hat-n / theta-hat-s
 ```{r}
 rg_w_theta_M1 <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat_M1_3.tsv",delim="\t")
+head(rg_w_theta_M1)
 ```
 
-
+EGGNOG annotations
 ```{r}
 annotations_M1 <- read_delim("~/Projects/Sediments/all_depths_M1_3/M1_3_combined.annotations",delim="\t",comment = "#")
 head(annotations_M1)
 ```
+MMSEQS2 easy-cluster , clustered by 50% amino acid identity.  First column defines gene used as the cluster representative (could easily be replaced by a number and I do that in the next line), second column shows the gene that's a part of the cluster.  Majority of clusters are singletons
+ala
+1 gene_1
+1 gene_2
+2 gene_3
+...
+
 ```{r}
 clusters_M1 <- read_delim("~/Projects/Sediments/clustered_aaai50_cluster_M1.tsv",col_names = c("cluster_rep","cluster_member"),delim="\t")
 head(clusters_M1)
@@ -48,6 +56,8 @@ head(busco_gene_ids_M1)
 ```{r}
 rg_w_theta_M1 <- left_join(rg_w_theta_M1 %>% mutate(is_busco = (gene %in% busco_gene_ids_M1$gene)), clusters_M1 %>% select(cluster_member, cluster_number), join_by(gene == cluster_member))
 ```
+
+bmc -> busco mean coverage
 ```{r}
 gene_clusters_M1 <- rg_w_theta_M1 %>% select(MAG, gene, cluster_number, is_busco, coverage, reads_source) %>% mutate(coverage = ifelse(is.na(coverage), 0, coverage))
 
@@ -55,50 +65,45 @@ busco_MAG_avg_M1 <- gene_clusters_M1 %>% filter(is_busco) %>%  group_by(MAG, rea
 busco_MAG_avg_M1
 ```
 
+
+reads_rel_change -> reads relative change (relative to BUSCO mean coverage)
 ```{r}
-
-```
-
-
-```{r}
-
-
 gene_clusters_M1 <- gene_clusters_M1%>% pivot_wider(values_from = coverage, names_from = reads_source) %>% pivot_longer(names_to = "reads_source", cols = c('1','3','5','7','10','25'), values_to = "coverage",values_drop_na = FALSE) %>% mutate(coverage = ifelse(is.na(coverage), 0, coverage))
 
 gene_clusters_M1 <- left_join(gene_clusters_M1 %>% mutate(reads_source = as.integer(reads_source)), busco_MAG_avg_M1, join_by(MAG, reads_source))
-```
-```{r}
+
 gene_clusters_M1 <- gene_clusters_M1 %>% mutate(reads_rel_change = coverage - bmc)
 ```
 
+here I produce linear models for each gene cluster.  This produces a long list of 4 values per gene cluster which I then label ($value_name) and then pivot_wider
 ```{r}
 gene_change_models_M1 <- gene_clusters_M1 %>%
   mutate(reads_source_factored = as.integer(factor(reads_source))) %>%
   group_by(cluster_number) %>%
-  filter(!is.na(coverage), n() > 1, !is.na(cluster_number)) %>%
+  filter(!is.na(coverage), (n_distinct(reads_source) > 3) & any(reads_source == 25) & (any(reads_source == 3) | any(reads_source == 1)), !is.na(cluster_number)) %>% 
   reframe(
     linear_model_summary = summary(lm(reads_rel_change ~ reads_source_factored))[["coefficients"]][2,]
   )
 gene_change_models_M1$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M1$cluster_number)/4)
 
-```
-
-```{r}
 gene_change_models_M1 <- gene_change_models_M1 %>% pivot_wider(values_from = linear_model_summary, names_from = value_name)
 gene_change_models_M1
 ```
+
+plot the p-values for each gene cluster
 ```{r}
-left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T) %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG) + theme_bw()
+left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T) %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG, scale="free_y") + theme_bw()
 ```
 
 
-
+calculate the q-values for each gene cluster and summarise by MAG to ID the proportion of genes under selection (that is the, prop of genes with significant changes in coverage by depth)
 ```{r}
 left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number))  %>% distinct(cluster_number, .keep_all=T) %>% group_by(MAG) %>% summarise(
   prop_under_selection = 1-qvalue(p_val)$pi0.lambda[1],
   n = n()
 )
 ```
+violin plot of non-busco vs busco genes coverage
 ```{r}
 left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number)) %>% filter(MAG == "refs/M1_3.182.filtered.fa") %>% ggplot(aes(x=factor(reads_source),y=coverage, color=is_busco)) + geom_violin() #  %>% select(gene, cluster_number, bmc, coverage, reads_rel_change, reads_source) %>% pivot_wider(names_from = reads_source, values_from =  c(reads_rel_change, coverage))
 ```
@@ -108,14 +113,14 @@ left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number)) %>% 
 left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number)) %>% filter(MAG == "refs/M1_3.182.filtered.fa") %>% ggplot(aes(x=factor(reads_source),y=reads_rel_change, color=is_busco)) + geom_violin()
 ```
 
-
+same linear regression tests but with fold change (fc), (coverage / busco-mean-coverage)
 ```{r}
 gene_change_models_M1_fc <- gene_clusters_M1 %>%
-  mutate(reads_source_factored = as.integer(factor(reads_source)), fold_change = coverage / bmc) %>%
+  mutate(reads_source_factored = as.integer(factor(reads_source)), l10_fold_change = log10((coverage + 1e-4) / bmc)) %>%
   group_by(cluster_number) %>%
-  filter(!is.na(coverage), n() > 1, !is.na(cluster_number)) %>%
+  filter(!is.na(coverage), (n_distinct(reads_source) > 3) & any(reads_source == 25) & (any(reads_source == 3) | any(reads_source == 1)), !is.na(cluster_number)) %>%
   reframe(
-    linear_model_summary = summary(lm(fold_change ~ reads_source_factored))[["coefficients"]][2,]
+    linear_model_summary = summary(lm(l10_fold_change ~ reads_source_factored))[["coefficients"]][2,]
   )
 gene_change_models_M1_fc$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M1_fc$cluster_number)/4)
 
@@ -131,13 +136,17 @@ left_join(gene_clusters_M1, gene_change_models_M1_fc, join_by(cluster_number))  
 ```{r}
 left_join(gene_clusters_M1, gene_change_models_M1_fc, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T) %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG,scales="free_y") + theme_bw()
 ```
+
+
+and again but instead of factorized depth (1,3,5... -> 1,2,3,...) as the explanatory, change to log10 depth (0, log10(3), log10(5), ...)
+
 ```{r}
 gene_change_models_M1_fc_vs_cmbsf <- gene_clusters_M1 %>%
-  mutate(log_cmbsf = log10(reads_source), fold_change = coverage / bmc, abs_change = coverage - bmc) %>%
+  mutate(log_cmbsf = log10(reads_source), l10_fc = log10((coverage+1e-4) / bmc), abs_change = coverage - bmc) %>%
   group_by(cluster_number) %>%
   filter(!is.na(coverage), n() > 1, !is.na(cluster_number)) %>%
   reframe(
-    linear_model_summary = summary(lm(abs_change ~ log_cmbsf))[["coefficients"]][2,]
+    linear_model_summary = summary(lm(l10_fc ~ log_cmbsf))[["coefficients"]][2,]
   )
 gene_change_models_M1_fc_vs_cmbsf$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M1_fc_vs_cmbsf$cluster_number)/4)
 
@@ -149,7 +158,7 @@ left_join(gene_clusters_M1, gene_change_models_M1_fc_vs_cmbsf, join_by(cluster_n
 )
 ```
 ```{r}
-left_join(gene_clusters_M1, gene_change_models_M1_fc_vs_cmbsf, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T) %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG) + theme_bw()
+left_join(gene_clusters_M1, gene_change_models_M1_fc_vs_cmbsf, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T) %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG, scale="free_y") + theme_bw()
 ```
 
 
