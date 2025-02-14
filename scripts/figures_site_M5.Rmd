@@ -10,6 +10,17 @@ Other people running this will need to adapt all the paths to various files (all
 library(tidyverse)
 library(gridExtra)
 library(grid)
+
+library(extrafont)
+font_import()
+loadfonts()
+
+theme_set(theme_bw())
+theme_update(text=element_text(size=22, family="Helvetica"))
+
+levels_ <- c("Acidobacteriota","Actinobacteriota","Atribacterota","Bacteroidota","Bipolaricaulota","BMS3Abin14","Calditrichota","Campylobacterota","Chloroflexota","Desulfobacterota","Gemmatimonadota","Hydrogenedentota","JABDJQ01","Krumholzibacteriota","KSB1","Methylomirabilota","Myxococcota","Myxococcota_A","Nitrospirota","Patescibacteria","Planctomycetota","Poribacteria","Proteobacteria","Spirochaetota","Verrucomicrobiota","Zixibacteria","All_Archaea")
+polychrome_27 <- c("#358d78","#a3583b","#b400fe","#fb0000","#00fe16","#fe1cbe","#f9bbfb","#ece500","#2aabff","#ff781c","#eedfb2","#45427e","#1cfdb4","#c1004f","#6aa526","#841662","#1ce8fd","#fc72fe","#faaf00","#322ac4","#937881","#cae5f6","#870da0","#fd90b4","#685d0d","#aff822","#b19afc")
+names(polychrome_27) <- levels_
 ```
 
 
@@ -35,7 +46,7 @@ raw_genome_M5_3 <- left_join(raw_genome_M5_3 %>% mutate(genome = gsub(".filtered
 
 
 ```{r}
-raw_genome_M5_3 %>% ggplot(aes(x=factor(reads_source), y=coverage, color=genome)) + geom_point(size=2.5) + theme_bw() + theme(text=element_text(size=22)) + labs(x="Reads Source (CmBSF)", color="MAG")
+raw_genome_M5_3 %>% ggplot(aes(x=factor(reads_source), y=coverage, color=genome)) + geom_point(size=2.5) + theme_bw() + labs(x="Reads Source (CmBSF)", color="MAG") + theme_get()
 ```
 ```{r}
 #raw_genome_M5_3 %>% ggplot(aes(x=factor(reads_source), y=coverage, color=genome)) + geom_point() + theme_bw() + theme(text=element_text(size=22)) + labs(x="Reads Source (CmBSF)", color="MAG")
@@ -408,6 +419,162 @@ lill_tax2 %>% filter((Site == "M5") & (Type == "RNA") & (domain_phyla %in% top_p
 ```
 
 ```{r}
-lill_tax2 %>% mutate(domain_phyla = ifelse(domain_phyla %in% top_phyla$domain_phyla, domain_phyla, "Other Bacteria")) %>% filter((Site == "M5") & (Type == "RNA") & ((domain_phyla %in% top_phyla$domain_phyla)|(domain_phyla == "Other Bacteria"))) %>% group_by(domain_phyla,Depth, read_total) %>% summarise(phyla_reads = sum(count)) %>% mutate(phyla_relabs = phyla_reads / read_total) %>% ggplot(aes(x=Depth,y=phyla_relabs, fill=domain_phyla)) + geom_bar(stat="identity") + labs(x="Cm Below Seafloor",y="16S RNA rel. abd.",fill="Phylum") + theme_bw() + scale_fill_manual(values=color_brewer_w_gray) + geom_vline(xintercept = 6.5, linetype="dotted",color="black") + theme(text=element_text(family="Helvetica",size=22)) 
+lill_tax2 %>% mutate(domain_phyla = ifelse(domain_phyla %in% top_phyla$domain_phyla, domain_phyla, "Other Bacteria")) %>% filter((Site == "M5") & (Type == "RNA") & ((domain_phyla %in% top_phyla$domain_phyla)|(domain_phyla == "Other Bacteria"))) %>% group_by(domain_phyla,Depth, read_total) %>% summarise(phyla_reads = sum(count)) %>% mutate(phyla_relabs = phyla_reads / read_total) %>% ggplot(aes(x=Depth,y=phyla_relabs, fill=domain_phyla)) + geom_bar(stat="identity") + labs(x="Cm Below Seafloor",y="16S RNA rel. abd.",fill="Phylum") + theme_bw() + scale_fill_manual(values=color_brewer_w_gray) + geom_vline(xintercept = 6.5, linetype="dotted",color="black") + theme(text=element_text(family="Helvetica",size=22), legend.position="none") #going to reuse the legend from the tree
+```
+The next sections will create a plot about how many genera we recover per sediment depth
+```{r}
+genera_summary <- lill_tax2 %>% filter(count > 5, Type=="DNA") %>% group_by(Site, Depth) %>% summarise(n_orgs = n())
+head(genera_summary)
+```
+
+This next section is about getting to the same place with MAGs
+```{r}
+m5_3_quality <- read_delim("~/Projects/Sediments/M5_3_MAG_completeness_contamination.tsv",delim="\t")
+m5_3_phylo_anno <- read_delim("~/Projects/Sediments/M5_3.bac120.summary.tsv",comment = "#",na=c("","NA","N/A","Unclassified Bacteria"))
+```
+```{r}
+m5_3_phylogeny <- m5_3_phylo_anno %>% select(user_genome, classification, warnings) %>% mutate(classification = gsub("[dpcofgs]__","", classification)) %>% separate_wider_delim(cols=classification,delim=";",names = c("Domain","Phylum","Class","Order","Family","Genus","Species"),too_few ="align_start",too_many="merge")
+```
+```{r}
+m5_25_phylo_anno <- read_delim("~/Projects/Sediments/M5_25.bac120.summary.tsv",comment = "#",na=c("","NA","N/A","Unclassified Bacteria"))
+m1_3_phylo_anno <- read_delim("~/Projects/Sediments/M1_3.bac120.summary.tsv",comment = "#",na=c("","NA","N/A","Unclassified Bacteria"))
+m1_25_phylo_anno <- read_delim("~/Projects/Sediments/M1_25.bac120.summary.tsv",comment = "#",na=c("","NA","N/A","Unclassified Bacteria"))
+
+```
+```{r}
+phylogenies <- rbind(m5_3_phylo_anno, m5_25_phylo_anno, m1_3_phylo_anno, m1_25_phylo_anno) %>%
+  select(user_genome, classification, warnings) %>%
+  mutate(classification = gsub("[dpcofgs]__","", classification)) %>%
+  separate_wider_delim(
+    cols=classification,delim=";",
+    names = c("Domain","Phylum","Class","Order","Family","Genus","Species"),
+    too_few ="align_start",
+    too_many="merge")
+
+head(phylogenies)
+```
+```{r}
+m1_3_quality <- read_delim("~/Projects/Sediments/M1_3_MAG_completeness_contamination.tsv",delim="\t") %>% mutate(MAG = gsub(" ","",MAG))
+head(m1_3_quality)
+```
+```{r}
+m1_25_quality <- read_delim("~/Projects/Sediments/M1_25_MAG_completeness_contamination.tsv",delim="\t")
+m5_25_quality <- read_delim("~/Projects/Sediments/M5_25_MAG_completeness_contamination.tsv",delim="\t")
+
+qualities <- rbind(m5_3_quality, m5_25_quality, m1_3_quality, m1_25_quality)
+```
+
+```{r}
+mag_table <- full_join(phylogenies %>% mutate(MAG = paste0(user_genome, ".fa")), qualities) %>% select(-user_genome) %>% separate_wider_delim(MAG, names=c("Sample","mag_number", "filtered","fa"), delim=".", cols_remove = F) %>% select(-mag_number, -filtered, -fa) %>% separate_wider_delim(Sample, names = c("Site","Depth"), delim="_")
+```
+```{r}
+write_delim(mag_table %>% filter((MAG %in% (lifestyle_plus_phylo %>% mutate(MAG = paste0(genome, ".filtered.fa")))$MAG) | MAG %in% ((lifestyle_plus_phylo_M1 %>% mutate(MAG = paste0(genome, ".filtered.fa")))$MAG)) %>% rename(gtdb_warnings = warnings),"~/Projects/Sediments/MAG_table_further_analysis.tsv",delim="\t")
+```
+
+```{r}
+mag_table %>% ggplot(aes(x=Duplications)) + geom_histogram(binwidth=1)  + xlim(0,25)+ facet_wrap(Site ~Depth, scales="free_y") + geom_vline(xintercept=3,linetype="dotted",color="red")
+```
+
+
+```{r}
+rbind(
+  mag_table %>% filter(Duplications < 4, Length > 5e5, Length < 5e6)  %>% group_by(Site, Depth) %>% summarise(n_orgs = n()) %>% ungroup() %>% mutate(type ="MAGs"),
+  genera_summary %>% ungroup() %>% mutate(type="ASVs")
+) %>% ggplot(aes(x=factor(as.integer(Depth)),y=n_orgs, fill=type)) + geom_bar(stat="identity",position=position_dodge()) + facet_wrap(type~Site, scales="free_y") + labs(x="CmBSF",y="Count") + theme_bw()
+```
+```{r}
+rbind(
+  mag_table %>% filter(Duplications < 4, Length > 5e5, Length < 5e6)  %>% group_by(Site, Depth) %>% summarise(n_orgs = n()) %>% ungroup() %>% mutate(type ="MAGs"),
+  genera_summary %>% ungroup() %>% mutate(type="ASVs")
+) %>% ggplot(aes(x=factor(as.integer(Depth)),y=n_orgs, fill=type)) + geom_bar(stat="identity",position=position_dodge()) + facet_wrap(~Site, scales="free_y") + labs(x="CmBSF",y="Count") + theme_bw()
+```
+
+```{r}
+lill_tax2 %>% filter(count > 5) %>% group_by(Site, Replicate, Depth, Type) %>% summarise(n_orgs = n()) %>% ungroup() %>% ggplot(aes(x=as.integer(Depth),y=n_orgs)) + geom_bar(stat="identity",position=position_dodge()) + facet_wrap(Type~Site+Replicate, scales="free_y",labeller = label_wrap_gen(multi_line=FALSE) ) + labs(x="CmBSF",y="ASV Count") + theme_bw()
+```
+
+
+
+```{r}
+site_depth_totals <- lill_tax2 %>% filter(count > 5) %>% group_by(Site, Depth, Replicate, Type) %>% summarise(filtered_read_total = sum(count)) %>% ungroup()
+lill_tax2 <- left_join(lill_tax2, site_depth_totals)
+```
+```{r}
+lill_tax2 <- lill_tax2 %>% filter(count > 5) %>% mutate(rel_abs = count / filtered_read_total)
+shannon_div <- lill_tax2 %>% group_by(Site, Depth, Replicate, Type) %>% summarise(shannon_diversity = -1*sum(rel_abs * log(rel_abs)))
+```
+```{r}
+shannon_div %>% ggplot(aes(x=Depth, y=shannon_diversity)) + geom_bar(stat="identity",position="dodge") + theme_bw() + facet_wrap(Type~Site+Replicate,labeller = label_wrap_gen(multi_line=FALSE)) + labs(x="CmBSF",y="Shannon Diversity") + ylim(0,6)
+```
+```{r}
+#here I cheat a bit, I know that the shannon diversity goes to 6 and there's max 600 ASVs in a sample so we make both y axes go to 6 and add a second with y*100 to get # of ASVs
+
+diversity_vs_ASVs_plot <- lill_tax2 %>%
+  filter(count >= 5) %>%
+  group_by(Site, Replicate, Depth, Type) %>%
+  summarise(n_asvs_transf = n() / 100, shannon_diversity = -1*sum(rel_abs * log(rel_abs))) %>%
+  ungroup() %>%
+  pivot_longer(cols=c(n_asvs_transf, shannon_diversity), names_to = "Metric") %>%
+  mutate(Metric = ifelse(Metric =="n_asvs_transf","ASVs","Shannon Div.")) %>% 
+  ggplot(aes(x=factor(as.numeric(Depth)), y=value, fill=Metric)) +
+    geom_bar(stat="identity", position="dodge") +
+    #theme_bw() +
+    scale_y_continuous(name = "Shannon Diversity", sec.axis = sec_axis(~.*100, name="ASV Count")) +
+    facet_wrap(Type~Site+Replicate,labeller = label_wrap_gen(multi_line=FALSE)) +
+    labs(x="CmBSF") +
+    scale_fill_manual(values=c("#298c8c","#f1a226")) +
+    #geom_vline(xintercept = 6.5, linetype="dotted",color="black")+
+    theme(legend.position="bottom", text=element_text(family="Helvetica",size=22), axis.text.x = element_text(family="Helvetica", size=14))
+diversity_vs_ASVs_plot
+```
+```{r}
+rna_16s_plot <- lill_tax2 %>%
+  mutate(mod_phyla = ifelse(DOMAIN == "Archaea","All_Archaea",Phylum)) %>%
+  filter((Site == "M5") & (Type == "RNA")) %>%
+  group_by(mod_phyla,Depth) %>%
+  summarise(rna_rel_abs = sum(count)/mean(filtered_read_total)) %>%
+  ggplot(aes(x=Depth,y=rna_rel_abs,fill=mod_phyla)) +
+    geom_bar(stat="identity") +
+    scale_fill_manual( values=polychrome_27) +
+    labs(x="Cm Below Seafloor",y="16S RNA rel abd.",fill="Phylum") +
+    geom_vline(xintercept = 6.5, linetype="dotted",color="black") + 
+    theme(legend.position = "none")
+rna_16s_plot
+```
+
+```{r}
+library("treeio")
+library("ggtree")
+
+m5_tree <- read.tree("~/Projects/Sediments/m5_combined_bac120_lg.nwk")
+m5_tree$tip.label = gsub(".filtered","",m5_tree$tip.label)
+m5_abundances <- read.table("~/Projects/Sediments/combined_M5_w_abundance.tsv",header=T, sep="\t")
+m5_abundances <- m5_abundances %>% mutate(Phylum = gsub("p__","",Phylum),Class = gsub("c__","",Class),Family = gsub("f__","",Family),Genus =gsub("g__","",Genus), Species = gsub("s__","",Species)) %>% mutate(user_genome = gsub(".filtered","",user_genome))
+temp2 <- m5_abundances %>% group_split(Phylum)
+l5 <- list()
+for (tib in temp2){
+    l5[[tib$Phylum[1]]] = tib$user_genome
+}
+
+m5_tree_w_phyla <- groupOTU(m5_tree, l5, "Phylum_")
+m5_tree_colored <- ggtree(m5_tree_w_phyla, layout="circular",aes(color=Phylum_),key_glyph="rect")
+m5_rel_abs <- m5_abundances %>% select("user_genome",starts_with("ra")) %>% column_to_rownames("user_genome")
+m5_tree_w_ab <- gheatmap(m5_tree_colored, data=m5_rel_abs, high="red",low="blue",width = 0.1, font.size = 0.1) 
+ctb <- read_table("~/Projects/Sediments/all_depths/combined_reference_M5_3.stb",col_names = c("scaffold","MAG"))
+ctb <- ctb %>% mutate(MAG = str_replace(MAG, ".filtered.fa",""))
+m5_combined_tree_w_ab_circle <- m5_tree_w_ab + geom_tiplab(aes(subset=(label %in% c(ctb$MAG))),offset=0.17, size=4, align=T, linesize = 0.01) + scale_color_manual(name="Phylum",values=polychrome_27) + theme(legend.position="right", legend.spacing.y = unit(0,"mm")) + guides(
+    size = guide_legend(
+      override.aes = list(linetype = c("solid", "blank"), shape = c(NA, 16))
+    )
+  )
+m5_combined_tree_w_ab_circle
+```
+
+
+```{r}
+sediment_cartoon <- ggplot() + cowplot::draw_image("~/Documents/Sediments presentations + paper/Figures/Sediment_core_cartoon_v2.svg")
+bottom_row = cowplot::plot_grid(m5_combined_tree_w_ab_circle, rna_16s_plot, labels=c("C","D"),rel_widths = c(1.2, 1), label_size = 48)
+top_row = cowplot::plot_grid(sediment_cartoon,diversity_vs_ASVs_plot, labels=c("A","B"), label_size = 48)
+panel_1 <- cowplot::plot_grid(top_row, bottom_row, nrow = 2, ncol=1)
 ```
 
