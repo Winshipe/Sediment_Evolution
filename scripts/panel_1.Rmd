@@ -1,0 +1,175 @@
+---
+title: "panel_1"
+output: html_document
+date: "2025-03-12"
+---
+
+```{r}
+library(ampvis2)
+library(tidyverse)
+library(extrafont)
+font_import()
+loadfonts()
+
+theme_set(theme_bw())
+theme_update(text=element_text(size=22, family="Helvetica"))
+
+```
+
+
+```{r}
+#Kasper Urup Kjeldsen kode (stolen shamelessly by me)
+
+myotutable <- read.delim("~/Downloads/1ASV_raw_abund_tax.txt")
+#1ASV_raw_abund_tax.txt
+#1ASV_table_absl_abund_tax.txt
+
+mymetadata <- read.delim("~/Downloads/Lilian_metadata.txt")
+
+d <- amp_load(otutable = myotutable,
+              metadata = mymetadata)
+
+nmds_out <- amp_ordinate(d, 
+             type = "nmds",
+             transform = "none",
+             distmeasure = "bray",
+             sample_color_by = "Ordering",
+             sample_label_by = "sediment_depth_cm",
+             sample_label_size = 3,
+             filter_species = 0.01,
+             sample_colorframe = FALSE,
+             sample_shape_by = "Ordering",
+             max.overlaps = Inf,
+             detailed_output = TRUE) 
+
+nmds_plot <- nmds_out$plot + theme(legend.position="bottom", text=element_text(family="Helvetica", size=16))
+nmds_plot
+```
+
+```{r}
+read_sums <- myotutable %>% rowwise() %>% mutate(read_total = across(ends_with("RNA"), ~sum(.x, na.rm=T))) %>% ungroup() %>% group_by( Genus) %>% summarise(read_total = sum(read_total))
+mags_further_analysis <- read_delim("~/Projects/Sediments/MAG_table_further_analysis.tsv")
+
+d2 <- amp_load(otutable = myotutable %>% select(-ends_with("DNA")),
+              metadata = mymetadata %>% mutate(sediment_depth_cm = as.numeric(gsub(",",".",sediment_depth_cm)), Bioturbation = ifelse(sediment_depth_cm < 7,"Bioturbated", "Non-bioturbated")))
+asv_heatmap <- amp_heatmap(d2,
+            group_by = "sediment_depth_cm",
+            facet_by = "Bioturbation",
+            tax_aggregate = "Genus",
+            tax_add = "Phylum",
+            tax_show = 20,
+            color_vector = c("lightblue", "darkmagenta"),
+            plot_colorscale = "sqrt",
+            plot_values = FALSE) +
+  theme(axis.text.x = element_text(angle = 45, size=10, vjust = 1),
+        axis.text.y = element_text(size=8),
+        legend.position="right")
+asv_heatmap
+```
+
+
+```{r}
+#mags_further_analysis = mags_further_analysis %>% mutate(Genus = ifelse(is.na(Genus), "NA", Genus)) %>% rowwise()  %>% mutate( taxon = paste(Order,Family,Genus,collapse = "_"))
+# top10_surface = lill_tax2 %>% filter(DOMAIN == "Bacteria", Type =="RNA", Depth < 7) %>% group_by(Genus) %>% summarise(nreads = sum(count)) %>% slice_max(nreads, n=10) 
+# myotutable2 <- myotutable %>% select(-ends_with("DNA")) %>% filter(Genus %in% mags_further_analysis$Genus)
+# top10_bottom = lill_tax2 %>% filter(DOMAIN == "Bacteria", Type =="RNA", Depth < 7) %>% group_by(Genus) %>% summarise(nreads = sum(count)) %>% slice_max(nreads, n=10) 
+# myotutable2 <- myotutable %>% select(-ends_with("DNA")) %>% filter(Genus %in% mags_further_analysis$Genus)
+# #myotutable2 <-myotutable2 %>% filter(taxon %in% gsub(" ","",mags_further_analysis$taxon))
+# d3 <- amp_load(otutable = myotutable2 ,
+#               metadata = mymetadata %>% mutate(sediment_depth_cm = as.numeric(gsub(",",".",sediment_depth_cm)), Bioturbation = ifelse(sediment_depth_cm < 7,"Bioturbated", "Non-bioturbated")))
+# amp_heatmap(d3,
+#             group_by = "sediment_depth_cm",
+#             facet_by = "Bioturbation",
+#             tax_aggregate = "Genus",
+#             tax_add = "Phylum",
+#             color_vector = c("blue", "red"),
+#             plot_colorscale = "sqrt",
+#             plot_values = FALSE) +
+#   theme(axis.text.x = element_text(angle = 45, size=10, vjust = 1),
+#         axis.text.y = element_text(size=8),
+#         legend.position="right")
+```
+
+
+```{r}
+raw_genome_1 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_1_genome_info.tsv",delim="\t") %>% mutate(reads_source = 1)
+raw_genome_3 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_3_genome_info.tsv",delim="\t") %>% mutate(reads_source = 3)
+raw_genome_7 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_7_genome_info.tsv",delim="\t") %>% mutate(reads_source = 7)
+raw_genome_10 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_10_genome_info.tsv",delim="\t") %>% mutate(reads_source = 10)
+raw_genome_25 <- read_delim("~/Projects/Sediments/all_depths/IS_raw_M5_3_25_genome_info.tsv",delim="\t") %>% mutate(reads_source = 25)
+lifestyle_plus_phylo <- read_delim("~/Projects/Sediments/lifestyles.tsv",delim="\t")
+raw_genome_M5_3 <- rbind(raw_genome_1, raw_genome_3, raw_genome_7, raw_genome_10, raw_genome_25)
+
+raw_genome_1 <- read_delim("~/Projects/Sediments/all_depths_M1_3/IS_raw_M1_3_1_genome_info.tsv",delim="\t") %>% mutate(reads_source = 1)
+raw_genome_3 <- read_delim("~/Projects/Sediments/all_depths_M1_3/IS_raw_M1_3_3_genome_info.tsv",delim="\t") %>% mutate(reads_source = 3)
+raw_genome_7 <- read_delim("~/Projects/Sediments/all_depths_M1_3/IS_raw_M1_3_7_genome_info.tsv",delim="\t") %>% mutate(reads_source = 7)
+raw_genome_10 <- read_delim("~/Projects/Sediments/all_depths_M1_3/IS_raw_M1_3_10_genome_info.tsv",delim="\t") %>% mutate(reads_source = 10)
+raw_genome_25 <- read_delim("~/Projects/Sediments/all_depths_M1_3/IS_raw_M1_3_25_genome_info.tsv",delim="\t") %>% mutate(reads_source = 25)
+lifestyle_plus_phylo_M1 <- read_delim("~/Projects/Sediments/lifestyles_M1_3.tsv",delim="\t")
+raw_genome_M1_3 <- rbind(raw_genome_1, raw_genome_3, raw_genome_7, raw_genome_10, raw_genome_25)
+
+left_join(raw_genome_M5_3, lifestyle_plus_phylo)
+
+mag_ab_plot <- left_join(rbind(raw_genome_M5_3,raw_genome_M1_3) %>% mutate(genome = gsub(".filtered.fa","",gsub("refs/","",genome))), mags_further_analysis %>% mutate(genome = gsub(".filtered.fa","",MAG))) %>% filter(!is.na(Family)) %>% mutate(Genus = ifelse((Genus == "NA") | is.na(Genus),paste("Uncl.", Family),Genus)) %>% mutate(name = paste0(genome, " (", Genus, ")")) %>% mutate(site = gsub("_.*","",genome)) %>% ggplot(aes(x=factor(reads_source), y=name, fill=log10(coverage))) + geom_tile(width=0.9) + scale_fill_continuous(high="darkmagenta",low="lightblue")  + scale_x_discrete(guide = guide_axis(angle = 60)) + theme(axis.title = element_text(size=22), legend.title = element_text(size=16), axis.text.y=element_text(size=14)) + labs(y="MAGs", x="Reads Source (CmBSF)", color="Log10 Coverage") + scale_y_discrete(limits=rev) + facet_wrap(~site,scales="free_y",ncol=1) + theme(strip.text.x = element_blank())
+
+mag_ab_plot
+```
+Here I generate the tree using the ggtree library, I remove MAGs with >15% contamination or <5% completeness from the coloring and abundance 
+
+```{r}
+library("treeio")
+library("ggtree")
+
+levels_ <- c("Acidobacteriota","Actinobacteriota","Atribacterota","Bacteroidota","Bipolaricaulota","BMS3Abin14","Calditrichota","Campylobacterota","Chloroflexota","Desulfobacterota","Gemmatimonadota","Hydrogenedentota","JABDJQ01","Krumholzibacteriota","KSB1","Methylomirabilota","Myxococcota","Myxococcota_A","Nitrospirota","Patescibacteria","Planctomycetota","Poribacteria","Proteobacteria","Spirochaetota","Verrucomicrobiota","Zixibacteria","All_Archaea")
+polychrome_27 <- c("#358d78","#a3583b","#b400fe","#fb0000","#00fe16","#fe1cbe","#f9bbfb","#ece500","#2aabff","#ff781c","#eedfb2","#45427e","#1cfdb4","#c1004f","#6aa526","#841662","#1ce8fd","#fc72fe","#faaf00","#322ac4","#937881","#cae5f6","#870da0","#fd90b4","#685d0d","#aff822","#b19afc")
+names(polychrome_27) <- levels_
+
+m5_3_quality <- read_delim("~/Projects/Sediments/M5_3_MAG_completeness_contamination.tsv",delim="\t") %>% mutate(user_genome = gsub(".fa","",MAG))
+m5_25_quality <- read_delim("~/Projects/Sediments/M5_25_MAG_completeness_contamination.tsv",delim="\t") %>% mutate(user_genome = gsub(".fa","",MAG))
+
+m5_tree <- read.tree("~/Projects/Sediments/combined_M5_tree.nwk")
+m5_tree$tip.label = gsub(".filtered","",m5_tree$tip.label)
+m5_abundances <- read.table("~/Projects/Sediments/combined_M5_w_abundance.tsv",header=T, sep="\t")
+m5_abundances <- left_join(m5_abundances, rbind(m5_3_quality,m5_25_quality))
+m5_abundances_f <- m5_abundances %>% filter(Duplications < 15, Completeness > 5)
+m5_abundances_f <- m5_abundances_f %>%
+  mutate(
+    Phylum = gsub("p__","",Phylum),
+    Class = gsub("c__","",Class),
+    Family = gsub("f__","",Family),
+    Genus =gsub("g__","",Genus),
+    Species = gsub("s__","",Species)
+    ) %>% mutate(user_genome = gsub(".filtered","",user_genome))
+temp2 <- m5_abundances_f %>% group_split(Phylum)
+l5 <- list()
+for (tib in temp2){
+    l5[[tib$Phylum[1]]] = tib$user_genome
+}
+
+m5_tree_w_phyla <- groupOTU(m5_tree, l5, "Phylum_")
+m5_tree_colored <- ggtree(m5_tree_w_phyla, layout="circular",aes(color=Phylum_),key_glyph="rect")
+m5_rel_abs <- m5_abundances_f %>% select("user_genome",starts_with("ra")) %>% column_to_rownames("user_genome")
+m5_tree_w_ab <- gheatmap(m5_tree_colored, data=m5_rel_abs, high="darkmagenta",low="lightblue",width = 0.1, font.size = 0.1) 
+ctb <- read_table("~/Projects/Sediments/all_depths/combined_reference_M5_3.stb",col_names = c("scaffold","MAG"))
+ctb <- ctb %>% mutate(MAG = str_replace(MAG, ".filtered.fa",""))
+m5_combined_tree_w_ab_circle <- m5_tree_w_ab + geom_tiplab(aes(subset=(label %in% c(ctb$MAG))),offset=0.17, size=4, align=T, linesize = 0.01) + scale_color_manual(name="Phylum",values=polychrome_27) + theme(legend.position="right", legend.spacing.y = unit(0,"mm")) + guides(
+    size = guide_legend(
+      override.aes = list(linetype = c("solid", "blank"), shape = c(NA, 16))
+    )
+  )
+m5_combined_tree_w_ab_circle
+```
+
+Here I use cowplot to join all the figures together into a panel
+```{r}
+sediment_cartoon <- ggplot() + cowplot::draw_image("~/Documents/Sediments presentations + paper/Figures/Sediment_core_cartoon_v2.svg") + cowplot::panel_border(remove=T)
+#legend = cowplot::get_plot_component(m5_combined_tree_w_ab_circle, 'guide-box-bottom', return_all = TRUE)
+#rna_plus_legend <- cowplot::plot_grid(rna_16s_plot, legend, ncol=1, nrow=2, rel_heights = c(1.5, 0.5))
+bottom_row = cowplot::plot_grid(m5_combined_tree_w_ab_circle, mag_ab_plot, rel_widths = c(2, 1), label_size = 32,labels = c("D","E")) 
+top_row = cowplot::plot_grid(sediment_cartoon, nmds_plot, asv_heatmap, label_size = 32,nrow=1,labels=c("A","B","C"))
+panel_1 <- cowplot::plot_grid(top_row, bottom_row, nrow = 2, ncol=1)
+panel_1
+#ggplot2::ggsave("~/Documents/Sediments presentations + paper/Figures/panel_1_draft_2.svg", panel_1,width =2300,height=1300, units="px")# these render funky so I use the normal Rstudio save instead
+#ggplot2::ggsave("~/Documents/Sediments presentations + paper/Figures/panel_1_draft_2.png", panel_1,width =2300,height=1300, units="px")
+```
+

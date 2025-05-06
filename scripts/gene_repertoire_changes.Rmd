@@ -1,408 +1,542 @@
 ---
-title: "gene repertoire changes"
+title: "gene_changes_over_genome_revamped"
 output: html_document
-date: "2025-01-29"
+date: "2025-03-20"
 ---
-
 
 ```{r}
 library(tidyverse)
-library(qvalue)
-```
-InStrain values plus my own calculation of Pn/Ps and theta-hat-n / theta-hat-s
-```{r}
-rg_w_theta_M1 <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat_M1_3.tsv",delim="\t")
-head(rg_w_theta_M1)
 ```
 
-EGGNOG annotations
 ```{r}
-annotations_M1 <- read_delim("~/Projects/Sediments/all_depths_M1_3/M1_3_combined.annotations",delim="\t",comment = "#")
-head(annotations_M1)
+rgwt_m5 <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat_M5.tsv",delim = "\t")
+rgwt_m5_33 <- rgwt_m5 %>% filter(MAG == "M5_3.3.filtered.fa")
 ```
-MMSEQS2 easy-cluster , clustered by 50% amino acid identity.  First column defines gene used as the cluster representative (could easily be replaced by a number and I do that in the next line), second column shows the gene that's a part of the cluster.  Majority of clusters are singletons
-ala
-1 gene_1
-1 gene_2
-2 gene_3
-...
+```{r}
+scaffold_info_M5 = read_delim("~/Projects/Sediments/IS_raw_M5_3_3_scaffold_info.tsv") %>% select(scaffold, length) %>% arrange(desc(length))
+head(scaffold_info_M5)
+```
+```{r}
+fix_missing_coverages <- function(genes_df){
+  return(
+    genes_df %>% 
+      select(gene, coverage, reads_source) %>%
+      pivot_wider(names_from=reads_source, values_from = coverage) %>%
+      pivot_longer(cols=starts_with("coverage"),names_to = "reads_source",values_to="coverage",names_prefix="coverage_",values_drop_na = FALSE) %>%
+      mutate(coverage = ifelse(is.na(coverage), 0, coverage)) %>%
+      mutate(reads_source = as.integer(reads_source))
+  )
+}
+```
 
 ```{r}
+#here we get retrieve the clusters which we made earlier at 50% Amino Acid Identity to try and boost 
+# sample size
+clusters_M5 <- read_delim("~/Projects/Sediments/clustered_aaai50_cluster_M5.tsv",col_names = c("cluster_rep","cluster_member"),delim="\t")
+clusters_M5 <- clusters_M5 %>% group_by(cluster_rep) %>% mutate(cluster_number = cur_group_id())
+
+busco_gene_ids_M5 <- read_delim("~/Projects/Sediments/busco_gene_ids.txt",delim=",",col_names = c("gene","scaffold"))
+
+#add busco status in to rgwt dataframe, also add the cluster numbers
+rgwt_m5_2 <- left_join(rgwt_m5 %>% mutate(is_busco = (gene %in% busco_gene_ids_M5$gene)), clusters_M5 %>% select(cluster_member, cluster_number), join_by(gene == cluster_member))
+
+#this section is about ensuring that every gene has coverage data at every depth
+#so we pivot_wider to create NAs if its outright missing, pivot_longer to bring it back with the new NAs
+#and then fill NAs with 0s (if it's not seen then it has no/0 coverage)
+gene_clusters_M5 <- rgwt_m5_2 %>%
+  select(MAG, gene, cluster_number, is_busco, coverage, reads_source) %>%
+  pivot_wider(values_from=coverage, names_from = reads_source,names_prefix="coverage_") %>% 
+  pivot_longer(cols=starts_with("coverage"),names_to = "reads_source",values_to="coverage",names_prefix="coverage_",values_drop_na = FALSE) %>%
+  mutate(coverage = ifelse(is.na(coverage), 0, coverage)) 
+
+#find the mean coverage of BUSCO genes per depth
+busco_MAG_avg_M5 <- gene_clusters_M5 %>% filter(is_busco) %>%  group_by(MAG, reads_source) %>% summarise(n = n(), bmc = mean(coverage, na.rm=T))
+head(busco_MAG_avg_M5)
+
+
+gene_clusters_M5 <- left_join(gene_clusters_M5, busco_MAG_avg_M5, join_by(MAG, reads_source))
+
+clusters_by_env_M5 <- gene_clusters_M5 %>%
+  filter(MAG %in% c("M5_3.3.filtered.fa","M5_3.252.filtered.fa","M5_3.68.filtered.fa")) %>%
+  mutate(reads_source = as.integer(reads_source)) %>%
+  mutate(log10_fold_change = log10((coverage + 0.001) / bmc))# %>%
+ # mutate(
+    #here we partition the reads_source (cmbsf) into 3 envs: surface (1,3,5), transition(7), semi deep (10) and deep (25)
+    #10 and 25 are considered deep community on the basis of ASVs & env filtering should be quick enough we don't need 
+    #a lot of generations
+  #  env_ = ifelse(reads_source < 7, 1, ifelse(reads_source == 7, 2, ifelse(reads_source == 10, 3, 4)))
+   # ) %>%
+  #mutate(env_factor = factor(env_))
+gene_change_models_M5_fc2 <- clusters_by_env_M5 %>%
+  #filter((env_ == "surface") | (env_ == 25)) %>%
+  group_by(cluster_number) %>%
+  reframe(
+    linear_model_summary = summary(lm(log10_fold_change ~log10(reads_source)))[["coefficients"]][2,]
+  )
+#right now the data is in a long form, so I add labels to pivot_wider
+gene_change_models_M5_fc2$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M5_fc2$cluster_number)/4)
+
+gene_change_models_M5_fc2 <- gene_change_models_M5_fc2 %>%
+  pivot_wider(values_from = linear_model_summary, names_from = value_name)
+
+gcM5 <- left_join(gene_clusters_M5, gene_change_models_M5_fc2, join_by(cluster_number)) %>%
+  filter(MAG %in% c("M5_3.3.filtered.fa","M5_3.252.filtered.fa","M5_3.68.filtered.fa"))
+```
+
+
+```{r}
+#one of the contigs in M5_3.252 is on the whole very depth sensitive so I remove it from this plot 
+m5_pvals_plot <- gcM5 %>%
+  distinct(cluster_number, .keep_all=T) %>%
+  mutate(genome = gsub(".filtered.fa","",MAG)) %>%
+  mutate(contig = gsub("_[0-9]+?$","", gene)) %>%
+  filter(contig != "contig_4729") %>%
+  ggplot(aes(x=p_val)) +
+    geom_histogram(binwidth = 0.03) +
+    facet_wrap(~genome) +
+    theme_bw() +
+    labs(x="P-value")
+```
+```{r}
+m5_pvals_plot
+```
+
+```{r}  
+lowest_pvals_m5 = gcM5 %>% filter(MAG == "M5_3.252.filtered.fa") %>% group_by(cluster_number) %>% slice_head(n=1) %>% ungroup() %>% slice_min(p_val , n=5)
+lowest_pvals_m5
+```
+```{r}
+best_genes_M5_3_252 <- clusters_by_env_M5 %>% filter(gene %in% lowest_pvals_m5$gene) %>% ggplot(aes(y=log10_fold_change, x=log10(reads_source))) + geom_point() + geom_smooth(method="lm",se=F) + facet_wrap(~gene) + theme_bw() + labs(x="log10 CmBSF", y="Log10 rel. fold change")
+```
+```{r}
+random_genes_M5_3_252 <- clusters_by_env_M5 %>% filter(gene %in% sample(unique((gcM5 %>% filter(MAG == "M5_3.252.filtered.fa"))$gene),5)) %>% ggplot(aes(y=log10_fold_change, x=log10(reads_source))) + geom_point() + facet_wrap(~gene) + theme_bw() + geom_smooth(method="lm",se=F) + labs(x="log10 CmBSF", y="Log10 rel. fold change")
+```
+```{r}
+m5_3_252_pval_plot <- cowplot::plot_grid(best_genes_M5_3_252, random_genes_M5_3_252, ncol=1)
+m5_3_252_pval_plot
+```
+
+
+
+```{r}
+rgwt_m1 <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat_m1_3.tsv",delim = "\t")
+
 clusters_M1 <- read_delim("~/Projects/Sediments/clustered_aaai50_cluster_M1.tsv",col_names = c("cluster_rep","cluster_member"),delim="\t")
-head(clusters_M1)
-```
-
-```{r}
 clusters_M1 <- clusters_M1 %>% group_by(cluster_rep) %>% mutate(cluster_number = cur_group_id())
-head(clusters_M1)
-```
-```{r}
-length(unique(clusters_M1$cluster_rep))
-```
-```{r}
-length(unique(clusters_M1$cluster_number))
-```
-```{r}
-length(clusters_M1$cluster_member)
-```
 
+busco_gene_ids_M1 <- read_delim("~/Projects/Sediments/M1_3_busco_gene_ids.txt",delim=",",col_names = c("gene","scaffold"))
 
+rgwt_m1_2 <- left_join(
+  rgwt_m1 %>% mutate(is_busco = (gene %in% busco_gene_ids_M1$gene)),
+  clusters_M1 %>% select(cluster_member, cluster_number), join_by(gene == cluster_member)
+  )
 
-
-```{r}
-busco_gene_ids_M1 <- read_delim("~/Projects/Sediments/M1_3_busco_gene_ids.txt",delim="\t",col_names = "gene")
-head(busco_gene_ids_M1)
-```
-```{r}
-rg_w_theta_M1 <- left_join(rg_w_theta_M1 %>% mutate(is_busco = (gene %in% busco_gene_ids_M1$gene)), clusters_M1 %>% select(cluster_member, cluster_number), join_by(gene == cluster_member))
-```
-
-bmc -> busco mean coverage
-```{r}
-gene_clusters_M1 <- rg_w_theta_M1 %>% select(MAG, gene, cluster_number, is_busco, coverage, reads_source) %>% mutate(coverage = ifelse(is.na(coverage), 0, coverage))
+gene_clusters_M1 <- rgwt_m1_2 %>%
+  select(MAG, gene, cluster_number, is_busco, coverage, reads_source) %>%
+  mutate(coverage = ifelse(is.na(coverage), 0, coverage)) %>%
+  pivot_wider(values_from=coverage, names_from = reads_source,names_prefix="coverage_") %>% 
+  pivot_longer(cols=starts_with("coverage"),names_to = "reads_source",values_to="coverage",names_prefix="coverage_",values_drop_na = FALSE) %>%
+  mutate(coverage = ifelse(is.na(coverage), 0, coverage))
 
 busco_MAG_avg_M1 <- gene_clusters_M1 %>% filter(is_busco) %>%  group_by(MAG, reads_source) %>% summarise(n = n(), bmc = mean(coverage, na.rm=T))
-busco_MAG_avg_M1
-```
+head(busco_MAG_avg_M1)
 
+gene_clusters_M1 <- left_join(gene_clusters_M1,
+                              busco_MAG_avg_M1,
+                              join_by(MAG, reads_source)) %>%
+  filter(MAG %in% c("refs/M1_3.182.filtered.fa","refs/M1_3.148.filtered.fa")) 
 
-reads_rel_change -> reads relative change (relative to BUSCO mean coverage)
-```{r}
-gene_clusters_M1 <- gene_clusters_M1%>% pivot_wider(values_from = coverage, names_from = reads_source) %>% pivot_longer(names_to = "reads_source", cols = c('1','3','5','7','10','25'), values_to = "coverage",values_drop_na = FALSE) %>% mutate(coverage = ifelse(is.na(coverage), 0, coverage))
-
-gene_clusters_M1 <- left_join(gene_clusters_M1 %>% mutate(reads_source = as.integer(reads_source)), busco_MAG_avg_M1, join_by(MAG, reads_source))
-
-gene_clusters_M1 <- gene_clusters_M1 %>% mutate(reads_rel_change = coverage - bmc)
-```
-
-here I produce linear models for each gene cluster.  This produces a long list of 4 values per gene cluster which I then label ($value_name) and then pivot_wider
-```{r}
-gene_change_models_M1 <- gene_clusters_M1 %>%
-  mutate(reads_source_factored = as.integer(factor(reads_source))) %>%
+clusters_by_env_M1 <- gene_clusters_M1 %>%
+  filter(MAG %in% c("refs/M1_3.182.filtered.fa","refs/M1_3.148.filtered.fa")) %>%
+  mutate(log10_fold_change = log10((coverage + 0.001) / bmc)) %>%
+  mutate(reads_source = as.integer(reads_source)) 
+  #mutate(
+    #here we partition the reads_source (cmbsf) into 3 envs: surface, transition & deep using the same values as above
+   # env_ = ifelse(reads_source < 7, "surface",ifelse((reads_source == 7) & (reads_source > 7), "transition","deep"))) %>%
+ # mutate(env_factor = factor(env_)) %>%
+gene_change_models_M1_fc2 <- clusters_by_env_M1 %>%
   group_by(cluster_number) %>%
-  filter(!is.na(coverage), (n_distinct(reads_source) > 3) & any(reads_source == 25) & (any(reads_source == 3) | any(reads_source == 1)), !is.na(cluster_number)) %>% 
+  #filter(!is.na(coverage), n() > 1, !is.na(cluster_number)) %>%
   reframe(
-    linear_model_summary = summary(lm(reads_rel_change ~ reads_source_factored))[["coefficients"]][2,]
+    linear_model_summary = summary(lm(log10_fold_change ~ log10(reads_source)))[["coefficients"]][2,]
   )
-gene_change_models_M1$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M1$cluster_number)/4)
+gene_change_models_M1_fc2$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M1_fc2$cluster_number)/4)
 
-gene_change_models_M1 <- gene_change_models_M1 %>% pivot_wider(values_from = linear_model_summary, names_from = value_name)
-gene_change_models_M1
-```
-
-plot the p-values for each gene cluster
-```{r}
-left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T) %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG, scale="free_y") + theme_bw()
-```
-
-
-calculate the q-values for each gene cluster and summarise by MAG to ID the proportion of genes under selection (that is the, prop of genes with significant changes in coverage by depth)
-```{r}
-left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number))  %>% distinct(cluster_number, .keep_all=T) %>% group_by(MAG) %>% summarise(
-  prop_under_selection = 1-qvalue(p_val)$pi0.lambda[1],
-  n = n()
-)
-```
-violin plot of non-busco vs busco genes coverage
-```{r}
-left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number)) %>% filter(MAG == "refs/M1_3.182.filtered.fa") %>% ggplot(aes(x=factor(reads_source),y=coverage, color=is_busco)) + geom_violin() #  %>% select(gene, cluster_number, bmc, coverage, reads_rel_change, reads_source) %>% pivot_wider(names_from = reads_source, values_from =  c(reads_rel_change, coverage))
+gene_change_models_M1_fc2 <- gene_change_models_M1_fc2 %>% pivot_wider(values_from = linear_model_summary, names_from = value_name)
+gcM1 <- left_join(gene_clusters_M1, gene_change_models_M1_fc2, join_by(cluster_number))
 ```
 
 
 ```{r}
-left_join(gene_clusters_M1, gene_change_models_M1, join_by(cluster_number)) %>% filter(MAG == "refs/M1_3.182.filtered.fa") %>% ggplot(aes(x=factor(reads_source),y=reads_rel_change, color=is_busco)) + geom_violin()
+m1_pvals_plot <- gcM1 %>% distinct(cluster_number, .keep_all=T) %>% mutate(genome = gsub("refs/","",gsub(".filtered.fa","",MAG)))  %>%ggplot(aes(x=p_val)) + geom_histogram(binwidth = 0.03) + facet_wrap(~genome) + theme_bw()+ labs(x="P-value")
+m1_pvals_plot
 ```
 
-same linear regression tests but with fold change (fc), (coverage / busco-mean-coverage)
 ```{r}
-gene_change_models_M1_fc <- gene_clusters_M1 %>%
-  mutate(reads_source_factored = as.integer(factor(reads_source)), l10_fold_change = log10((coverage + 1e-4) / bmc)) %>%
-  group_by(cluster_number) %>%
-  filter(!is.na(coverage), (n_distinct(reads_source) > 3) & any(reads_source == 25) & (any(reads_source == 3) | any(reads_source == 1)), !is.na(cluster_number)) %>%
-  reframe(
-    linear_model_summary = summary(lm(l10_fold_change ~ reads_source_factored))[["coefficients"]][2,]
+sim_data = rbind(data.frame(p_val = runif(4000), source="H0"), data.frame(p_val = rbeta(400, 1, 10), source="HA"))
+sim_pvals_plot <- sim_data %>% ggplot(aes(x=p_val, fill=source)) + geom_histogram() + ggthemes::scale_fill_colorblind() + labs(x="P-value") + theme(legend.position="none", text=element_text(size=14)) 
+```
+
+```{r}
+cowplot::plot_grid(cowplot::plot_grid(sim_pvals_plot, m1_pvals_plot,rel_widths = c(1,2), rows = 1), m5_pvals_plot, cols=1)
+```
+```{r}
+gcM5 %>% 
+  group_by(MAG) %>%
+  filter(!grepl("contig_4729", gene)) %>%
+  summarise(
+    pct_true_pos <- 1 - qvalue::qvalue(p = p_val, fdr.level = 0.1)$pi0
   )
-gene_change_models_M1_fc$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M1_fc$cluster_number)/4)
-
-gene_change_models_M1_fc <- gene_change_models_M1_fc %>% pivot_wider(values_from = linear_model_summary, names_from = value_name)
-```
-
-```{r}
-left_join(gene_clusters_M1, gene_change_models_M1_fc, join_by(cluster_number))  %>% distinct(cluster_number, .keep_all=T) %>% group_by(MAG) %>% summarise(
-  prop_under_selection = 1-qvalue(p_val)$pi0.lambda[1],
-  n = n()
-)
 ```
 ```{r}
-left_join(gene_clusters_M1, gene_change_models_M1_fc, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T) %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG,scales="free_y") + theme_bw()
-```
-
-
-and again but instead of factorized depth (1,3,5... -> 1,2,3,...) as the explanatory, change to log10 depth (0, log10(3), log10(5), ...)
-
-```{r}
-gene_change_models_M1_fc_vs_cmbsf <- gene_clusters_M1 %>%
-  mutate(log_cmbsf = log10(reads_source), l10_fc = log10((coverage+1e-4) / bmc), abs_change = coverage - bmc) %>%
-  group_by(cluster_number) %>%
-  filter(!is.na(coverage), n() > 1, !is.na(cluster_number)) %>%
-  reframe(
-    linear_model_summary = summary(lm(l10_fc ~ log_cmbsf))[["coefficients"]][2,]
+gcM1 %>% 
+  group_by(MAG) %>%
+  summarise(
+    pct_true_pos <- 1 - qvalue::qvalue(p = p_val, fdr.level = 0.1)$pi0
   )
-gene_change_models_M1_fc_vs_cmbsf$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M1_fc_vs_cmbsf$cluster_number)/4)
-
-gene_change_models_M1_fc_vs_cmbsf <- gene_change_models_M1_fc_vs_cmbsf %>% pivot_wider(values_from = linear_model_summary, names_from = value_name)
-
-left_join(gene_clusters_M1, gene_change_models_M1_fc_vs_cmbsf, join_by(cluster_number))  %>% distinct(cluster_number, .keep_all=T) %>% group_by(MAG) %>% summarise(
-  prop_under_selection = 1-qvalue(p_val)$pi0.lambda[1],
-  n = n()
-)
-```
-```{r}
-left_join(gene_clusters_M1, gene_change_models_M1_fc_vs_cmbsf, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T) %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG, scale="free_y") + theme_bw()
-```
-
-
-
-
-```{r}
-gene_change_models_M1_envs <- gene_clusters_M1 %>%
-  mutate(envt = ifelse(reads_source %in% c(1,3,5), 1, ifelse(reads_source %in% c(7, 10), 2, 3))) %>%
-  group_by(envt, cluster_number) %>%
-  summarise(mean_rrc = mean(coverage) - mean(bmc)) %>% ungroup() %>%
-  group_by(cluster_number) %>%
-  filter(!is.na(mean_rrc), n() > 1, !is.na(cluster_number)) %>%
-  reframe(
-    linear_model_summary = summary(lm(mean_rrc ~ envt))[["coefficients"]][2,]
-  )
-gene_change_models_M1_envs$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M1_envs$cluster_number)/4)
-
-gene_change_models_M1_envs <- gene_change_models_M1_envs %>% pivot_wider(values_from = linear_model_summary, names_from = value_name)
-```
-```{r}
-left_join(gene_clusters_M1, gene_change_models_M1_envs, join_by(cluster_number))  %>% distinct(cluster_number, .keep_all=T) %>% group_by(MAG) %>% summarise(
-  prop_under_selection = 1-qvalue(p_val)$pi0.lambda[1],
-  n = n()
-)
 ```
 
 ```{r}
-left_join(gene_clusters_M1, gene_change_models_M1_envs, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T) %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG) + theme_bw()
-```
-
-```{r}
-#left_join(gene_clusters_M1, annotations_M1, join_by(gene == query)) %>% separate_longer_delim(cols=KEGG_ko, delim=",") %>% filter(KEGG_ko %in% sig_keggs_M5)
-```
-```{r}
-gc_fc_M1 <- gene_clusters_M1 %>%
-  mutate(fold_change = coverage / bmc) %>% mutate(log_fc = log10(fold_change), abs_log_fc = abs(log10(fold_change)))
-gc_fc_M1_limited <- gc_fc_M1 %>% filter(gene %in% (gc_fc_M1 %>% slice_max(order_by=abs_log_fc, n = 100))$gene)
-gc_fc_M1_limited %>% ggplot(aes(x=factor(reads_source), y=log_fc)) + geom_point()
-```
-```{r}
-gene_clusters_M1 %>% ggplot(aes(x=factor(reads_source), y=bmc)) + geom_point()
-
-```
-
-
-
-
-```{r}
-shared_kos = intersect(annotations_M1 %>% separate_longer_delim(cols=KEGG_ko, delim=",") %>% select(KEGG_ko) %>% filter(KEGG_ko != "-"), annotations_M5%>% separate_longer_delim(cols=KEGG_ko, delim=",") %>% select(KEGG_ko) %>% filter(KEGG_ko != "-"))
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-```{r}
-rg_w_theta_M5 <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat.tsv",delim="\t")
-```
-
-
-```{r}
-annotations_M5 <- read_delim("~/Projects/Sediments/all_depths/combined_annotations.txt",delim="\t",comment = "#")
-head(annotations_M5)
-```
-```{r}
-clusters_M5 <- read_delim("~/Projects/Sediments/clustered_aaai50_cluster_M5.tsv",col_names = c("cluster_rep","cluster_member"),delim="\t")
-head(clusters_M5)
-```
-
-```{r}
-clusters_M5 <- clusters_M5 %>% group_by(cluster_rep) %>% mutate(cluster_number = cur_group_id())
-head(clusters_M5)
-```
-```{r}
-length(unique(clusters_M5$cluster_rep))
-```
-```{r}
-length(unique(clusters_M5$cluster_number))
-```
-```{r}
-length(clusters_M5$cluster_member)
-```
-
-
-
-
-```{r}
+rl <- left_join(
+    rgwt_m5_33 %>% filter(reads_source==3),
+    scaffold_info_M5 %>% rename(scaff_length = length)
+  ) %>% select(scaffold, scaff_length, MAG) %>%
+  group_by(scaffold) %>% slice(1) %>% ungroup() %>%
+  arrange(desc(scaff_length)) %>% 
+  mutate(scaffold_nb = row_number()) %>%
+  mutate(scaff_rl = cumsum(scaff_length))
+rl <- rl %>% mutate(scaff_rl2 = lag(scaff_rl)) %>% mutate(scaff_rl2 = ifelse(is.na(scaff_rl2),0, scaff_rl2)) %>% select(-scaff_rl)
+rgwt_m5_33 <- left_join(rgwt_m5_33, rl) %>% mutate(running_length = scaff_rl2 + start)
 busco_gene_ids_M5 <- read_delim("~/Projects/Sediments/busco_gene_ids.txt",delim=",",col_names = c("gene","scaffold"))
-head(busco_gene_ids_M1)
+head(busco_gene_ids_M5)
+rgwt_m5_33 <- rgwt_m5_33 %>% mutate(is_busco = (gene %in% busco_gene_ids_M5$gene))
+busco_MAG_avg_M5_33 <- rgwt_m5_33 %>% filter(is_busco) %>%  group_by(MAG, reads_source) %>% summarise(n = n(), bmc = mean(coverage, na.rm=T))
+head(busco_MAG_avg_M5)
 ```
 ```{r}
-rg_w_theta_M5 <- left_join(rg_w_theta_M5 %>% mutate(is_busco = (gene %in% busco_gene_ids_M5$gene)), clusters_M5 %>% select(cluster_member, cluster_number), join_by(gene == cluster_member))
+mean(rgwt_m5_33$reads_source)
+rgwt_m533_3v25 <- rgwt_m5_33 %>% filter((reads_source == 3) | (reads_source == 25)) %>% select(gene, scaffold, scaffold_nb, running_length, scaff_length, scaff_rl2, reads_source, coverage, is_busco, start) %>% pivot_wider(names_from = reads_source, values_from = coverage, names_prefix = "coverage_")
+head(rgwt_m533_3v25 %>% arrange(desc(scaff_length)))
 ```
 ```{r}
-gene_clusters_M5 <- rg_w_theta_M5 %>% select(MAG, gene, cluster_number, is_busco, coverage, reads_source) %>% mutate(coverage = ifelse(is.na(coverage), 0, coverage))
-
-busco_MAG_avg_M5 <- gene_clusters_M5 %>% filter(is_busco) %>%  group_by(MAG, reads_source) %>% summarise(n = n(), bmc = mean(coverage, na.rm=T))
-busco_MAG_avg_M5
-```
-```{r}
-gene_clusters_M5 <- left_join(gene_clusters_M5, busco_MAG_avg_M5, join_by(MAG, reads_source))
-```
-```{r}
-gene_clusters_M5 <- gene_clusters_M5 %>% mutate(reads_rel_change = coverage - bmc)
+rgwt_m533_3v25 <- rgwt_m533_3v25 %>% mutate(bmc_3 = 45.88911, bmc_25 = 128.60610)
 ```
 
 ```{r}
-gene_change_models_M5 <- gene_clusters_M5 %>%
-  mutate(reads_source_factored = as.integer(factor(reads_source))) %>%
-  group_by(cluster_number) %>%
-  filter(!is.na(coverage), n() > 1, !is.na(cluster_number)) %>%
-  reframe(
-    linear_model_summary = summary(lm(reads_rel_change ~ reads_source_factored))[["coefficients"]][2,]
-  )
-gene_change_models_M5$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M5$cluster_number)/4)
-
-```
-
-```{r}
-gene_change_models_M5 <- gene_change_models_M5 %>% pivot_wider(values_from = linear_model_summary, names_from = value_name)
-gene_change_models_M5
-```
-```{r}
-left_join(gene_clusters_M5, gene_change_models_M5, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T)  %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG) + theme_bw()
-```
-
-```{r}
-sig_keggs_M5 <- left_join(annotations_M5,left_join(gene_clusters_M5, gene_change_models_M5, join_by(cluster_number)),join_by(query == gene))  %>% filter(p_val < 0.15, KEGG_ko != "-")  %>% distinct(query, .keep_all = T) %>% separate_longer_delim(cols=KEGG_ko, delim=",")
-```
-
-
-
-
-```{r}
-gene_change_models_M5_fc <- gene_clusters_M5 %>%
-  mutate(log10_fold_change = log10(coverage / bmc)) %>%
-  mutate(reads_source_factored = as.integer(factor(reads_source))) %>%
-  group_by(cluster_number) %>%
-  filter(!is.na(coverage), n() > 1, !is.na(cluster_number)) %>%
-  reframe(
-    linear_model_summary = summary(lm(log10_fold_change ~ reads_source_factored))[["coefficients"]][2,]
-  )
-gene_change_models_M5_fc$value_name = rep(c("coef","SE","t_val","p_val"),length(gene_change_models_M5_fc$cluster_number)/4)
-
-gene_change_models_M5_fc <- gene_change_models_M5_fc %>% pivot_wider(values_from = linear_model_summary, names_from = value_name)
-left_join(gene_clusters_M5, gene_change_models_M5_fc, join_by(cluster_number)) %>% distinct(cluster_number, .keep_all=T)  %>% ggplot(aes(x=p_val)) + geom_histogram() + facet_wrap(~MAG) + theme_bw()
-
-```
-```{r}
-gene_clusters_M5 %>%
-  mutate(fold_change = coverage / bmc) %>%
-  ggplot(aes(x=factor(reads_source), y=log10(fold_change)))  + geom_violin()
-```
-```{r}
-gc_fc_M5 <- gene_clusters_M5 %>%
-  mutate(fold_change = coverage / bmc) %>% mutate(log_fc = log10(fold_change), abs_log_fc = abs(log10(fold_change)))
-gc_fc_M5_limited <- gc_fc_M5 %>% filter(gene %in% (gc_fc_M5 %>% slice_max(order_by=abs_log_fc, n = 100))$gene)
-gc_fc_M5_limited %>% ggplot(aes(x=factor(reads_source), y=log_fc)) + geom_point()
-```
-```{r}
-gene_clusters_M5 %>% ggplot(aes(x=factor(reads_source), y=bmc)) + geom_point()
-```
-
-```{r}
-left_join(gene_clusters_M5, gene_change_models_M5, join_by(cluster_number))  %>% distinct(cluster_number, .keep_all=T) %>% group_by(MAG) %>% summarise(
-  prop_under_selection = 1-qvalue(p_val)$pi0.lambda[1],
-  n = n()
-)
-```
-
-```{r}
-left_join(gene_clusters_M5, gene_change_models_M5_fc, join_by(cluster_number))  %>% distinct(cluster_number, .keep_all=T) %>% group_by(MAG) %>% summarise(
-  prop_under_selection = 1-qvalue(p_val)$pi0.lambda[1],
-  n = n()
-)
-```
-
-
-
-
-
-
-
-
-```{r}
-m1_m5_clusters <- read_delim("~/Projects/Sediments/M1_M5_aaai_50_cluster.tsv",col_names = c("cluster_rep","cluster_member")) %>% group_by(cluster_rep) %>% mutate(cluster_number = cur_group_id()) %>% ungroup()
-head(m1_m5_clusters)
-```
-```{r}
-#ideally here I'd use a regex (?=M[15])_ but I'm not sure if lookahead/behind exists in R??
-m1_m5_clusters <- m1_m5_clusters %>% select(-cluster_rep) %>% mutate(cluster_member = gsub("M1_","M1#",cluster_member)) %>% mutate(cluster_member = gsub("M5_","M5#",cluster_member)) %>% separate_wider_delim(cols = cluster_member, names=c("Site","gene"), delim="#")
-```
-```{r}
-head(m1_m5_clusters)
-```
-```{r}
-gene_clusters_M1
-```
-
-```{r}
-m1_m5_reg_comp <- left_join(left_join(m1_m5_clusters,left_join(gene_change_models_M1_fc, gene_clusters_M1 %>% mutate(rfc = coverage / bmc)) %>% select(-cluster_number), join_by(gene == gene)),left_join(gene_change_models_M5_fc, gene_clusters_M5 %>% mutate(rfc = coverage / bmc)) %>% select(-cluster_number), join_by(gene == gene), suffix=c("_M1","_M5")) %>% filter(!is.na(p_val_M5) & !is.na(p_val_M1))
-```
-
-```{r}
-m1_m5_reg_comp %>% filter(reads_source_M1 == reads_source_M5) %>% ggplot(aes(x=log10(rfc_M5), y=log10(rfc_M1))) + geom_hex() + theme_bw() + geom_hline(yintercept=0, linetype="dotted", color="red") + geom_vline(xintercept=0, linetype="dotted",color="red") + coord_fixed() + labs(x="Gene Covg / Busco Mean Covg @ M5", y="Gene Covg / Busco Mean Covg @ M1") + geom_abline(slope=1, color="red", linetype="dotted") + facet_wrap(~reads_source_M1)
+rgwt_m533_3v25 <- rgwt_m533_3v25 %>% mutate(delta_c = log10(coverage_3 / bmc_3) - log10(coverage_25 / bmc_25)) 
+rgwt_m533_3v25 %>% mutate(delta_c = log10(coverage_3 / bmc_3) - log10(coverage_25 / bmc_25)) %>% summarise(mean(delta_c,na.rm=T), sqrt(var(delta_c,na.rm=T)))
 ```
 
 
 ```{r}
+rgwt_m533_3v25 %>% ggplot(aes(x=delta_c)) + geom_histogram() + geom_vline(xintercept=2*0.168+0.0117, linetype="dotted")+geom_vline(xintercept=-2*0.168+0.0117, linetype="dotted")
+```
 
+```{r}
+rgwt_m533_3v25 %>% ggplot(aes(x=running_length, y = -delta_c)) + geom_point() 
+```
+```{r}
+ises <-read_delim("~/Projects/Sediments/ise_finder_M5_3.3.tsv") %>% rename(scaffold = seqID)
+annotations <- rgwt_m533_3v25 %>% group_by(scaffold) %>% summarise(ctg_start = min(running_length,na.rm=T), ctg_end = max(running_length,na.rm=T))
+annotations <- left_join(annotations, ises) %>% mutate(adj_IS_start = ctg_start + isBegin, adj_IS_end = ctg_start + isEnd)
+```
+```{r}
+left_join(rgwt_m533_3v25, annotations) %>% arrange(desc(scaff_length)) %>% ggplot(aes(x=running_length, y = -delta_c)) + geom_point()  + geom_segment(aes(y=-4.5,x=ctg_start, xend = ctg_end, color=ifelse(scaffold =="contig_49", "contig_49",ifelse(scaffold_nb %% 2 == 0, "even","odd")))) + scale_color_manual(name="scaffolds",values=c("blue","black","grey")) + geom_segment(aes(y=-4.3, x=adj_IS_start, xend=adj_IS_end), color="red") + geom_vline(aes(xintercept=ctg_start),linetype="dotted")
+```
+
+```{r}
+
+left_join(rgwt_m533_3v25, annotations) %>%
+  filter(scaffold =="contig_49") %>%
+  ggplot(aes(x=start, y = -delta_c)) +
+  geom_point() +
+  #new_scale_color() +
+  geom_segment(aes(y=-1.5, x=isBegin, xend=isEnd), color="red", linewidth=2)
+
+#contig_8614
+```
+
+```{r}
+m5_33_uniref_hits <- read_delim("~/Projects/Sediments/M5_3_3_fna_uniref90",col_names = c("gene","From", "pident","length","mismatch","gapopen","qstart","qend","sstart","send","evalue","bitscore"))
+head(m5_33_uniref_hits)
+uniref_annotations <- read_delim("~/Projects/Sediments/uniref_ids_annotations.txt")
+head(uniref_annotations)
+
+m5_33_anno = left_join(m5_33_uniref_hits, uniref_annotations)
+
+me_terms ='recombinase|excise|exciase|excisionase|recombination|transposase|lysogenic|prophage|temperate|integrase|repressor'
+
+
+```
+
+```{r}
+annotations %>% group_by(family) %>% summarise(n = n())
+```
+
+```{r}
+me_genes = m5_33_anno %>% filter(grepl(me_terms, `Protein names`,ignore.case = T))
+```
+```{r}
+rgwt_m533_3v25 <- rgwt_m533_3v25 %>% mutate(is_me_gene = gene %in% me_genes$gene)
+```
+```{r}
+rgwt_m533_3v25 %>% filter(scaffold =="contig_49") %>% ggplot(aes(x=start, y = -delta_c, color=is_me_gene)) + geom_point() + facet_wrap(~is_me_gene,ncol=1)
+```
+```{r}
+rgwt_m533_3v25 %>% filter(scaffold =="contig_49") %>% ggplot(aes(x=start, y = -delta_c, color=is_me_gene)) + geom_point() + ggthemes::scale_color_colorblind()# + scale_size_manual(values = c(TRUE = 0.9, FALSE=0.8))
+```
+```{r}
+left_join(rgwt_m533_3v25, annotations) %>%
+  filter(scaffold =="contig_49") %>%
+  ggplot(aes(x=start, y = -delta_c, color=is_me_gene)) +
+  geom_point() +
+  ggthemes::scale_color_colorblind() +
+  #new_scale_color() +
+  geom_segment(aes(y=-1, x=isBegin, xend=isEnd), color="red", linewidth=2)
+```
+```{r}
+zoom_contig = "contig_49"
+zoom_plot_me_m533_ctg_49 <- left_join(left_join(rgwt_m533_3v25, gcM5), annotations) %>%
+  mutate(status = ifelse(is_busco, "BUSCO", ifelse(is_me_gene, "ME gene",  ifelse(p_val < 0.1, "Env. Sensative","Others")))) %>%
+  ggplot(aes(x=running_length, y = -delta_c)) +
+    geom_point(aes(color=status)) + 
+    scale_color_manual(name="Gene Status",values=c("#E16A86", "#50A315", "#009ADE","grey")) +
+    ggnewscale::new_scale_color() +
+    geom_rug(
+      aes(
+        x = running_length,
+        length=scaff_length,
+        color=ifelse(scaffold ==zoom_contig, zoom_contig,ifelse(scaffold_nb %% 2 == 0, "even","odd"))
+        ), 
+      sides="b",
+      linewidth=1.5
+    ) +
+   # geom_segment(aes(y=-0.8, x=isBegin+scaff_rl2, xend=isEnd+scaff_rl2), color="red", linewidth=2.5) +
+    scale_color_manual(name="scaffolds",values=c("blue","black","grey")) +
+    geom_vline(aes(xintercept=scaff_rl2),linetype="dotted") + 
+    ggforce::facet_zoom(xy = scaffold == zoom_contig, horizontal = F) +
+    labs(x="Artificial coordinates (bp)",y="Rel. fold change covg (3 vs 25 CmBSF)") 
+zoom_plot_me_m533_ctg_49
+```
+
+
+
+```{r}
+cnames = c("gene","From", "pident","length","mismatch","gapopen","qstart","qend","sstart","send","evalue","bitscore")
+uniref_hits <- rbind(
+  read_delim("~/Projects/Sediments/M1_3_148_fna_uniref90",col_names = cnames),
+  rbind(
+    rbind(
+      read_delim("~/Projects/Sediments/M1_3_182_fna_uniref90",col_names = cnames),
+      read_delim("~/Projects/Sediments/M5_3_252_fna_uniref90",col_names = cnames)
+    ),
+    rbind(
+      read_delim("~/Projects/Sediments/M5_3_68_fna_uniref90",col_names = cnames),
+      read_delim("~/Projects/Sediments/M5_3_3_fna_uniref90",col_names = cnames)
+      )
+  ))
+```
+
+```{r}
+uniref_hits <- uniref_hits %>% group_by(gene) %>% slice_head(n=1) #already ordered by evalue
+```
+
+```{r}
+uniref_ids <- plyr::rbind.fill(
+    read_delim("~/Projects/Sediments/M5_3_252_uniref_Id_mapping"),
+    plyr::rbind.fill(
+      plyr::rbind.fill(
+        read_delim("~/Projects/Sediments/thiogranum_uniref_annotations.tsv"),#M1_3_148
+        read_delim("~/Projects/Sediments/M5_3_68_uniref_ID_mapping")
+      ),
+      plyr::rbind.fill(
+         read_delim("~/Projects/Sediments/uniref_ids_annotations.txt"),#M5_3_3
+         read_delim("~/Projects/Sediments/M1_3_182_uniref_anno.tsv")
+      )
+    )
+) %>% distinct(From, .keep_all=T)
 ```
 
 
 ```{r}
-summary(m1_m5_reg_comp %>% lm(coef_M1 ~ coef_M5, data=.))
+
+gene_annotations <- left_join(uniref_hits %>% select(gene, From), uniref_ids) 
 ```
 
 
 
+```{r}
+scaffold_info_m1 = read_delim("~/Projects/Sediments/IS_raw_M1_3_3_scaffold_info.tsv") %>% select(scaffold, length) %>% arrange(desc(length))
+```
+```{r}
+rgwt_m1 <- left_join(rgwt_m1, busco_MAG_avg_M1 %>% mutate(reads_source = as.integer(reads_source))) %>% mutate(is_busco = (gene %in% busco_gene_ids_M1$gene))
+```
 
 
 ```{r}
+make_running_length <- function(genes_df, scaffold_df, mag_name, regression_df){
+  rl <- left_join(
+    genes_df %>% filter(reads_source==3, MAG==mag_name),
+    scaffold_df %>% rename(scaff_length = length)
+  ) %>% select(scaffold, scaff_length, MAG) %>%
+  group_by(scaffold) %>% slice(1) %>% ungroup() %>%
+  arrange(desc(scaff_length)) %>% 
+  mutate(scaffold_nb = row_number()) %>%
+  mutate(scaff_rl = cumsum(scaff_length))
+  rl <- rl %>% mutate(scaff_rl2 = lag(scaff_rl)) %>% mutate(scaff_rl2 = ifelse(is.na(scaff_rl2),0, scaff_rl2)) %>% select(-scaff_rl)
+  return(rl)
+}
+make_zoom_plot <- function(genes_df, scaff_df, myMAG,regression_df,annotation_df, zoom_contig){
+  rl = make_running_length(genes_df, scaff_df, myMAG) # running length
+  mag_genes_df <- left_join(
+                    genes_df %>% filter(MAG == myMAG), 
+                    rl ) %>%
+                  mutate(running_length = scaff_rl2 + start) %>%
+                  rename(ctg_start = scaff_rl2)
+  mag_genes_df <- mag_genes_df %>%
+    filter(MAG == myMAG) %>%
+    filter((reads_source == 3) | (reads_source == 25)) %>%
+    select(gene, MAG, reads_source, coverage, bmc, running_length, ctg_start, scaff_length, scaffold, scaffold_nb, is_busco) %>%
+    pivot_wider(names_from = reads_source, values_from = c(coverage,bmc)) %>%
+    mutate(delta_c = log10(coverage_3 / bmc_3) - log10(coverage_25 / bmc_25)) %>%
+    arrange(desc(scaff_length))
+  
+  mag_genes_df <- left_join(mag_genes_df, regression_df %>% select(gene, p_val))
+  
+  me_terms = 'recombinase|excise|exciase| excisionase|recombination|transposase|lysogenic|prophage|temperate|integrase|repressor'
+  mag_genes_df <- left_join(mag_genes_df, annotation_df) %>% mutate(is_me_gene = grepl(me_terms ,`Protein names`,ignore.case = T))
+  mag_genes_df <- mag_genes_df %>% 
+    mutate(status = ifelse(is_busco, "BUSCO", ifelse(p_val < 0.1, ifelse(is_me_gene,"Env. Sens. ME","Env. Sensative"), ifelse(is_me_gene, "ME gene", "Others"))))
+  
+  myplot <- mag_genes_df %>% ggplot(aes(x=running_length, y = -delta_c)) +
+    geom_point(aes(color=status)) + 
+    scale_color_manual(name="Gene Status",values=c("#E16A86","#909800", "#00AD9A", "#9183E6","grey")) +#colors from colorspace dark3
+    ggnewscale::new_scale_color() +
+    geom_rug(
+      aes(
+        x = running_length,
+        length=scaff_length,
+        color=ifelse(scaffold ==zoom_contig, zoom_contig,ifelse(scaffold_nb %% 2 == 0, "even","odd"))
+        ), 
+      sides="b",
+      linewidth=1.5
+    ) +
+    scale_color_manual(name="scaffolds",values=c("blue","black","grey")) +
+    geom_vline(aes(xintercept=ctg_start),linetype="dotted") + 
+    ggforce::facet_zoom(xy = scaffold == zoom_contig, horizontal = F) +
+    labs(x="Artificial coordinates (bp)",y="Rel. fold change covg (3 vs 25 CmBSF)") 
+  return(myplot)
+}
+```
 
+
+```{r}
+make_delta_c_plot <- function(genes_df, scaff_df, myMAG,regression_df, annotation_df){
+  rl = make_running_length(genes_df, scaff_df, myMAG) # running length
+  mag_genes_df <- left_join(
+                    genes_df %>% filter(MAG == myMAG), 
+                    rl ) %>%
+                  mutate(running_length = scaff_rl2 + start) %>%
+                  rename(ctg_start = scaff_rl2)
+  mag_genes_df <- mag_genes_df %>%
+    filter(MAG == myMAG) %>%
+    filter((reads_source == 3) | (reads_source == 25)) %>%
+    select(gene, MAG, reads_source, coverage, bmc, running_length, ctg_start, scaff_length, scaffold, scaffold_nb, is_busco) %>%
+    pivot_wider(names_from = reads_source, values_from = c(coverage,bmc)) %>%
+    mutate(delta_c = log10(coverage_3 / bmc_3) - log10(coverage_25 / bmc_25)) %>%
+    arrange(desc(scaff_length))
+  mag_genes_df <- left_join(mag_genes_df, regression_df %>% select(gene, p_val))
+ me_terms = 'recombinase|excise|exciase| excisionase|recombination|transposase|lysogenic|prophage|temperate|integrase|repressor'
+ mag_genes_df <- left_join(mag_genes_df, annotation_df) %>% mutate(is_me_gene = grepl(me_terms ,`Protein names`,ignore.case = T))
+ mag_genes_df <- mag_genes_df %>% 
+    mutate(status = ifelse(is_busco, "BUSCO", ifelse(p_val < 0.1, ifelse(is_me_gene,"Env. Sens. ME","Env. Sensative"), ifelse(is_me_gene, "ME gene", "Others"))))
+  myplot <- mag_genes_df %>% ggplot(aes(x=running_length, y = -delta_c)) +
+    geom_point(aes(color=status)) + 
+    scale_color_manual(name="Gene Status",values=c("#E16A86","#909800", "#00AD9A", "#9183E6","grey")) +
+    ggnewscale::new_scale_color() +
+    geom_rug(
+      aes(
+        x = running_length,
+        length=scaff_length,
+        color=ifelse(scaffold_nb %% 2 == 0, "even","odd")
+        ), 
+      sides="b",
+      linewidth=1.5
+    ) +
+    scale_color_manual(name="scaffolds",values=c("black","grey")) +
+    geom_vline(aes(xintercept=ctg_start),linetype="dotted") + 
+    #ggforce::facet_zoom(xy = scaffold == zoom_contig, horizontal = F) +
+    labs(x="Artificial coordinates (bp)",y="Rel. fold change covg (3 vs 25 CmBSF)") 
+  return(myplot)
+}
+```
+
+
+
+```{r}
+zoom_plot_m1_148 <- make_zoom_plot(rgwt_m1, scaffold_info_m1, "refs/M1_3.148.filtered.fa",gcM1,"contig_6440")
+zoom_plot_m1_148
+```
+```{r}
+zoom_plot_m1_182 <-make_zoom_plot(rgwt_m1, scaffold_info_m1, "refs/M1_3.182.filtered.fa",gcM1,"contig_13446")
+zoom_plot_m1_182
+```
+```{r}
+busco_MAG_avg_M5 <- rgwt_m5 %>% filter(is_busco) %>%  group_by(MAG, reads_source) %>% summarise(n = n(), bmc = mean(coverage, na.rm=T))
+head(busco_MAG_avg_M5)
+```
+
+```{r}
+rgwt_m5 <- left_join(rgwt_m5 %>% select(-bmc, -n), busco_MAG_avg_M5 %>% mutate(reads_source = as.integer(reads_source))) %>% mutate(is_busco = (gene %in% busco_gene_ids_M5$gene))
+```
+
+```{r}
+delta_c_plot_m5_252 <- make_delta_c_plot(rgwt_m5, scaffold_info_M5, "M5_3.252.filtered.fa",gcM5, gene_annotations)
+delta_c_plot_m5_252
+```
+```{r}
+left_join(rgwt_m5 %>% select(scaffold, MAG), scaffold_info_M5) %>% filter(MAG == "M5_3.252.filtered.fa") %>% distinct() %>% arrange(desc(length)) %>% mutate(scaff_rl = cumsum(length)) %>% mutate(ctg_start = lag(scaff_rl))
+```
+
+
+```{r}
+zoom_plot_m5_252 <-make_zoom_plot(rgwt_m5, scaffold_info_M5, "M5_3.252.filtered.fa",gcM5,gene_annotations, "contig_42331")
+zoom_plot_m5_252 + geom_segment(x = 1394428+10878, xend =1394428+26164, color="red", y=-1.3, linewidth=2 )
+```
+```{r}
+zoom_plot_m5_252_2 <-make_zoom_plot(rgwt_m5, scaffold_info_M5, "M5_3.252.filtered.fa",gcM5,gene_annotations, "contig_4729")
+zoom_plot_m5_252_2 
+```
+```{r}
+gene_annotations %>% filter(gene %in% lowest_pvals_m5$gene) %>% select(gene, From, `Protein names`, `Gene Names`)
+```
+
+
+```{r}
+zoom_plot_m5_3 <-make_zoom_plot(rgwt_m5, scaffold_info_M5, "M5_3.3.filtered.fa",gcM5,gene_annotations, "contig_49")
+zoom_plot_m5_3
+```
+
+
+```{r}
+delta_c_plot_m5_68<- make_delta_c_plot(rgwt_m5, scaffold_info_M5, "M5_3.68.filtered.fa",gcM5)
+delta_c_plot_m5_68
+```
+```{r}
+delta_c_plot_m5_33 <-  make_delta_c_plot(rgwt_m5, scaffold_info_M5, "M5_3.3.filtered.fa",gcM5)
+delta_c_plot_m5_33
+```
+```{r}
+delta_c_plot_m5_68
+```
+
+```{r}
+me_genes %>% filter(grepl("contig_49",gene)) %>% group_by(gene) %>% slice_head(n=1)
+```
+```{r}
+annotations %>% filter(scaffold == "contig_49")
+```
+```{r}
+left_join(rgwt_m5_33 %>% filter(scaffold=="contig_49"), m5_33_anno) %>% filter(scaffold =="contig_49", start > 540000, end < 550000) %>% select(gene, start, end,pident, length, evalue,`Protein names`, From) %>% group_by(gene) %>% slice(1)
 ```
 
