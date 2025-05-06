@@ -1,0 +1,329 @@
+---
+title: "nearly neutral figure"
+output: html_document
+date: "2025-03-12"
+---
+
+```{r}
+library(tidyverse)
+```
+```{r}
+rg_w_theta_m5 <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat_M5.tsv")
+
+lifestyle_plus_phylo_m5 <- read_delim("~/Projects/Sediments/lifestyles.tsv")
+
+rg_w_theta_m5 <- left_join(rg_w_theta_m5, lifestyle_plus_phylo_m5 %>% mutate(MAG = paste0(genome, ".filtered.fa")))
+
+rg_w_theta_m5 <- rg_w_theta_m5 %>% mutate(pn_ps = P_n/P_s)
+```
+
+```{r}
+make_even_odd_summary <- function(genes_df){
+  return(
+    left_join(
+      genes_df %>%
+        group_by(MAG, reads_source, lifestyle) %>%
+        filter(coverage > 5) %>%
+        filter(theta_ns != Inf, pn_ps != Inf) %>%
+        filter((start %% 2 ) == 0) %>% #even numbered starts -> theta-hat S, odd numbered starts -> theta-hat NS
+        summarise(
+          log_p_s_mean = mean(log(P_s+0.001), na.rm=T),
+          theta_s_mean = mean(theta_s, na.rm=T),
+          theta_s_median = median(theta_s, na.rm=T),
+          var_log_p_s = var(log(P_s), na.rm=T)
+        ),
+      genes_df %>%
+        group_by(MAG, reads_source, lifestyle) %>%
+        filter(coverage > 5) %>%
+        filter(theta_ns != Inf, pn_ps != Inf) %>%
+        filter((start %% 2 ) == 1) %>%
+        summarise(
+          log_p_ns_mean = mean(log(pn_ps+0.001), na.rm=T),
+          is_pnps = mean(pNpS_variants,na.rm=T),
+          theta_ns_mean = mean(theta_ns, na.rm=T),
+          theta_ns_median = median(theta_ns, na.rm=T),
+          n = n(),
+          var_pnps = var(pn_ps,na.rm=T),
+          var_log_pnps = var(log(pn_ps + 0.001), na.rm=T),
+          var_log_tns = var(log(theta_ns + 0.001), na.rm=T)
+        ),
+    by = join_by(MAG, reads_source, lifestyle)
+  )  
+  )
+}
+```
+
+```{r}
+plot_eo_pnps <- function(eo_df, x_start, x_end, y_start, y_end){
+  vals <- list(`1`="#6aa526", `3`="#841662", `5`="#322ac4",`7`="#1ce8fd", `10`="#fc72fe", `25`="#faaf00")
+  plot <- eo_df %>%
+    ggplot(aes(x=log_p_s_mean, y=log_p_ns_mean, color=factor(reads_source))) +
+      geom_point(aes(size=log10(n)))+
+      #geom_errorbar(aes(ymin=log_p_ns_mean - 0.5*var_log_pnps, ymax=log_p_ns_mean + 0.5*var_log_pnps)) + 
+      labs(
+        y="Natural Log πN/πS ",
+        x="Natural Log πS",
+        size="Log10 \n # of genes",
+        color="CmBSF")  +
+      theme(text=element_text(size=22)) +
+      theme_bw() +
+      geom_smooth(method="lm", se=F) +
+      scale_color_manual(values=vals) +
+      geom_segment(x=x_start, xend=x_end, y=y_start, yend=y_end, color="black",linewidth = 1.1, linetype="dashed") 
+  return(plot)
+}
+```
+
+```{r}
+rg_w_theta_sum_eo_m5 <- make_even_odd_summary(rg_w_theta_m5)
+```
+
+
+
+
+
+```{r}
+pnps_ps_m5_bw <- rg_w_theta_sum_eo_m5 %>% ggplot(aes(x=log_p_s_mean, y=log_p_ns_mean)) + geom_point(aes(size=log10(n)))+ labs(y="Natural Log πN/πS ", x="Natural Log πS", size="Log10 \n # of genes", color="CmBSF")  + theme(text=element_text(size=22)) + theme_bw() + geom_smooth(method="lm", se=F)
+pnps_ps_m5_bw
+```
+
+```{r}
+rg_w_theta_sum_eo_m5 %>% group_by(reads_source) %>% summarise(p_val = summary(lm(data=cur_data(), formula=log(theta_ns_mean) ~ theta_s_mean))[["coefficients"]][2,4],r2 = summary(lm(data=cur_data(), formula=log(theta_ns_mean) ~ theta_s_mean))$r.squared)
+
+```
+```{r}
+rg_w_theta_sum_eo_m5 %>% group_by(reads_source) %>% summarise(p_val = summary(lm(data=cur_data(), formula=log(theta_ns_mean) ~ theta_s_mean,weights = 1/var_log_tns))[["coefficients"]][2,4],r2 = summary(lm(data=cur_data(), formula=log(theta_ns_mean) ~ theta_s_mean, weights = 1/var_log_tns))$r.squared)
+```
+weighted theta_hat_n_th_s vs theta_hat_s
+```{r}
+wtt = 1/rg_w_theta_sum_eo_m5$var_log_tns
+summary(lm(data=rg_w_theta_sum_eo_m5, formula = log(theta_ns_mean) ~ log(theta_s_mean), weights = wtt))
+```
+
+```{r}
+all_pnps_m5_eo <- rg_w_theta_sum_eo_m5 %>% lm(data=., formula=log_p_ns_mean ~ log_p_s_mean)
+summary(all_pnps_m5_eo)
+```
+```{r}
+ggplot() + geom_point(aes(x=rg_w_theta_sum_eo_m5$log_p_s_mean, y=all_pnps_m5_eo$residuals)) + theme_bw() + labs(x="Log mean πS",y="Residuals")
+```
+
+
+
+
+```{r}
+bptest(all_pnps_m5_eo)
+```
+```{r}
+#wt <- 1 / lm(abs(all_pnps_m5_eo$residuals) ~ all_pnps_m5_eo$fitted.values)$fitted.values^2
+#wt = 1 / exp(rg_w_theta_sum_eo_m5$log_p_s_mean)^2 
+#all_pnps_m5_eo_wt = rg_w_theta_sum_eo_m5 %>% lm(data=., formula=log_p_ns_mean ~ log_p_s_mean, weights=wt)
+#summary(all_pnps_m5_eo_wt)
+```
+```{r}
+wt2 = 1 / rg_w_theta_sum_eo_m5$var_log_pnps
+all_pnps_m5_eo_wt2 = rg_w_theta_sum_eo_m5 %>% lm(data=., formula=log_p_ns_mean ~ log_p_s_mean, weights=wt2)
+summary(all_pnps_m5_eo_wt2)
+```
+
+```{r}
+#wt3 = 1 / rg_w_theta_sum_eo_m5$var_pnps
+#all_pnps_m5_eo_wt3 = rg_w_theta_sum_eo_m5 %>% lm(data=., formula=log_p_ns_mean ~ log_p_s_mean, weights=wt3)
+#summary(all_pnps_m5_eo_wt2)
+```
+
+```{r}
+predict(all_pnps_m5_eo_wt2, newdata=data.frame(log_p_s_mean = c(-6,-4.25)))
+```
+
+
+```{r}
+pnps_ps_m5 <- plot_eo_pnps(rg_w_theta_sum_eo_m5, -6, -4.25, -1.22, -1.79)
+pnps_ps_m5
+```
+
+```{r}
+rg_w_theta_sum_eo_m5 %>% ungroup() %>% summarise(mean(log_p_ns_mean), mean(var_log_pnps))
+```
+```{r}
+ggplot() + geom_point(aes(x=(rg_w_theta_sum_eo_m5 %>% filter(!is.na(var_log_pnps)))$log_p_s_mean, y=all_pnps_m5_eo_wt2$residuals)) + theme_bw() + labs(x="Log mean πS",y="Residuals")
+
+```
+
+```{r}
+#rg_w_theta_sum_eo_m5 %>% ggplot(aes(x=abs(log_p_ns_mean), y=var_log_pnps)) + geom_point()
+```
+
+```{r}
+#not super poisson
+poisson_regr <- summary(
+  rg_w_theta_sum_eo_m5 %>%
+    mutate(trans_log_p_s_mean = as.integer(-10000*log_p_s_mean), trans_log_p_ns_mean = as.integer(-10000*log_p_ns_mean)) %>% #here we have to transform it into discrete counts
+    glm(trans_log_p_ns_mean ~ trans_log_p_s_mean, data=., family="poisson")
+  )
+```
+Cohen's R2 (yes this is cheating but I need it to loosely compare to the LM output)
+```{r}
+(poisson_regr$null.deviance - poisson_regr$deviance) / poisson_regr$null.deviance
+```
+So it's less statistically sound and doesn't work as well
+
+
+```{r}
+df = data.frame(log_p_s_mean=seq(-6.5, -4, .1))
+predict(object=all_pnps_m5_eo_wt,newdata=df)
+```
+
+
+```{r}
+weighted_regression_by_reads_source <- function(eo_df){
+   return(
+     eo_df %>%
+      group_by(reads_source) %>%
+      summarise(
+        slope = summary(
+          lm(
+            data=cur_data(),
+            formula=log_p_ns_mean ~ log_p_s_mean,
+            weights=1/var_log_pnps
+            )
+          )[["coefficients"]][2,1],
+        p_val = summary(
+          lm(
+            data=cur_data(),
+            formula=log_p_ns_mean ~ log_p_s_mean),
+            weights=1/var_log_pnps
+          )[["coefficients"]][2,4],
+        r2 = summary(
+          lm(data=cur_data(),
+             formula=log_p_ns_mean ~ log_p_s_mean,
+             weights=1/var_log_pnps)
+          )$r.squared
+        ) %>% ungroup()
+   )
+}
+find_regression_values_weighted <- function(eo_df){
+  summary_all <- weighted_regression_by_reads_source(
+    eo_df %>%
+    mutate(reads_source = "all")
+    )
+  
+  summary_grouped <- weighted_regression_by_reads_source(eo_df)
+  print(colnames(summary_all))
+  print(colnames(summary_grouped))
+  return(
+    rbind(summary_all, summary_grouped)
+    )
+}
+```
+
+```{r}
+weighted_r2_M5 <- find_regression_values_weighted(rg_w_theta_sum_eo_m5)
+```
+
+
+
+
+```{r}
+#theta_ns_theta_s_m5 <- rg_w_theta_sum_eo_m5 %>% ggplot(aes(x=log(theta_s_mean), y=log(theta_ns_mean), color=factor(reads_source), label=MAG)) + geom_point(aes(size=log10(n)))  +  labs(y="Natural Log \U03B8N / \U03B8S Odd positions ", x="Natural Log \U03B8S Even positions", size="Log10 \n # of genes") + theme(text=element_text(size=22)) + theme_bw() + geom_smooth(method="lm", se=F) 
+
+#theta_ns_theta_s_m5
+```
+
+```{r}
+rg_w_theta_m1 <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat_m1_3.tsv")
+
+lifestyle_plus_phylo_m1 <- read_delim("~/Projects/Sediments/lifestyles_M1_3.tsv")
+
+rg_w_theta_m1 <- left_join(rg_w_theta_m1, lifestyle_plus_phylo_m1 %>% mutate(MAG = paste0(genome, ".filtered.fa")))
+
+rg_w_theta_m1 <- rg_w_theta_m1 %>% mutate(pn_ps = P_n/P_s)
+```
+```{r}
+rg_w_theta_sum_eo_m1 <- make_even_odd_summary(rg_w_theta_m1)
+```
+```{r}
+pnps_all_m1_eo <- rg_w_theta_sum_eo_m1 %>% lm(data=., formula = log_p_ns_mean ~ log_p_s_mean)
+summary(pnps_all_m1_eo)
+```
+
+```{r}
+ggplot() + geom_point(aes(x=rg_w_theta_sum_eo_m1$log_p_s_mean, y=pnps_all_m1_eo$residuals)) + theme_bw() + labs(x="Log mean πS",y="Residuals")
+
+```
+
+```{r}
+lmtest::bptest(pnps_all_m1_eo)
+```
+
+
+```{r}
+pnps_ps_m1_bw <- rg_w_theta_sum_eo_m1 %>%
+  ggplot(aes(x=log_p_s_mean, y=log_p_ns_mean)) +
+  geom_point(aes(size=log10(n))) +
+  geom_errorbar(aes(ymin=log_p_ns_mean - 0.5*var_log_pnps, ymax=log_p_ns_mean + 0.5*var_log_pnps)) +
+  labs(y="Natural Log πN/πS ", x="Natural Log πS", size="Log10 \n # of genes", color="CmBSF") +
+  theme(text=element_text(size=22)) +
+  theme_bw() +
+  geom_smooth(method="lm", se=F)
+pnps_ps_m1_bw
+```
+
+```{r}
+wt_m1 = 1 / rg_w_theta_sum_eo_m1$var_log_pnps 
+pnps_all_m1_eo2 <- rg_w_theta_sum_eo_m1 %>% lm(data=., formula = log_p_ns_mean ~ log_p_s_mean,weights=wt_m1)
+summary(pnps_all_m1_eo2)
+
+```
+```{r}
+ggplot() + geom_point(aes(x=(rg_w_theta_sum_eo_m1 %>% filter(!is.na(var_log_pnps)))$log_p_s_mean, y=pnps_all_m1_eo2$residuals)) + theme_bw() + labs(x="Log mean πS",y="Residuals")
+
+```
+```{r}
+predict(pnps_all_m1_eo2, newdata=data.frame(log_p_s_mean = c(-6,-4.25)))
+```
+
+```{r}
+pnps_ps_m1 <- plot_eo_pnps(rg_w_theta_sum_eo_m1, -6, -4, -1.344, -1.646)
+pnps_ps_m1
+```
+
+
+
+
+
+
+
+```{r}
+#rg_w_theta_sum_eo_m1 %>% group_by(reads_source) %>% summarise(p_val = summary(lm(data=cur_data(), formula=log(theta_ns_mean) ~ theta_s_mean))[["coefficients"]][2,4],r2 = summary(lm(data=cur_data(), formula=log(theta_ns_mean) ~ theta_s_mean))$r.squared)
+```
+```{r}
+#rg_w_theta_sum_eo_m1 %>% group_by(reads_source) %>% summarise(p_val = summary(lm(data=cur_data(), formula=log_p_ns_mean ~ log_p_s_mean))[["coefficients"]][2,4],r2 = summary(lm(data=cur_data(), formula=log_p_ns_mean ~ log_p_s_mean))$r.squared)
+```
+
+
+
+```{r}
+weighted_r2_M1 <- find_regression_values_weighted(rg_w_theta_sum_eo_m1)
+weighted_r2_M1
+```
+
+
+```{r}
+library(cowplot)
+```
+```{r}
+cowplot::plot_grid(pnps_ps_m5, pnps_ps_m1 , ncol = 2, labels = c("M5","M1"))
+```
+```{r}
+cowplot::plot_grid(pnps_ps_m5, pnps_ps_m1, pnps_ps_m5_bw, pnps_ps_m1_bw , ncol = 2, labels = c("M5","M1"))
+```
+
+table
+```{r}
+regression_vals <- rbind(weighted_r2_M1 %>% mutate(site = "M1"), weighted_r2_M5 %>% mutate(site = "M5"))
+regression_vals %>% write_delim("~/Projects/Sediments/regression_outputs.tsv",delim="\t")
+
+regression_vals
+```
+
