@@ -1,0 +1,286 @@
+---
+title: "new_figures"
+output: html_document
+date: "2025-06-19"
+---
+
+Covers all the panels except figure 1
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+rgwt_m5 <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat_M5.tsv")
+all_depths_pi_n_pi_s_M5 = data.frame(data.frame(matrix(ncol = 21, nrow = 0)))
+colnames(all_depths_pi_n_pi_s_M5) <- c("gene","MAG","start","reads_source","gene_length","Ls","Ln","coverage","sites_N","sites_S","n_variants_N","n_variants_S","pi_N","pi_S","theta_N","theta_S","pi_NS","theta_NS","p_N","p_S","p_NS")
+
+for( i in c(1, 3, 7, 10, 25)){
+  temp_snvs <- read_delim(paste0("~/Projects/Sediments/all_depths/IS_raw_M5_3_",i,"_SNVs.tsv"))
+
+  temp_snvs <- left_join(temp_snvs, rgwt_m5  %>% filter(reads_source == i) %>% select(gene,MAG,start, gene_length, Ls, Ln, coverage) )
+
+  temp_snvs <- temp_snvs %>%
+    mutate(
+      position_pi =  1 - ((A / position_coverage)**2 + (C / position_coverage)**2 + (T / position_coverage)**2 + (G / position_coverage)**2)
+    )
+  temp_genes_plus_p_pi <- temp_snvs %>%
+    group_by(gene,MAG,start, mutation_type, gene_length, Ls, Ln, coverage) %>%
+    summarise(
+      mean_SNV_pi = mean(position_pi),
+      sites = n(),
+      n_variants = sum(allele_count) - n() # allele_count = 2 -> reference + variant
+    ) %>% filter((mutation_type == "N") | (mutation_type == "S")) %>%
+    pivot_wider(
+      id_cols = c(gene, start, MAG, gene_length, Ls, Ln, coverage),
+      names_from=mutation_type,
+      values_from = c(mean_SNV_pi, sites, n_variants)
+      )
+  temp_genes_plus_pi <- temp_genes_plus_p_pi %>%
+    mutate(
+      pi_N = (mean_SNV_pi_N / Ln),
+      pi_S = (mean_SNV_pi_S / Ls),
+      theta_N = (sites_N / (Ln * log(coverage))),
+      theta_S = (sites_S / (Ls * log(coverage))),
+      p_N = (n_variants_N / Ln),
+      p_S = (n_variants_S / Ls)
+    ) %>%
+    mutate(
+      pi_NS = pi_N / pi_S,
+      theta_NS = theta_N / theta_S,
+      p_NS = p_N / p_S #hahaha
+    ) %>% select(-mean_SNV_pi_N, -mean_SNV_pi_S) %>% #intermediary values not needed in final
+    mutate(reads_source = i)
+  all_depths_pi_n_pi_s_M5 <- rbind(all_depths_pi_n_pi_s_M5, temp_genes_plus_pi)
+}
+all_depths_pi_n_pi_s_M5 %>% write_delim("~/Projects/Sediments/pop_gen_gene_stats_M5_3.tsv",delim="\t")
+
+```
+
+
+```{r}
+rgwt_m1 <- read_delim("~/Projects/Sediments/raw_genes_filtered_w_theta_hat_m1_3.tsv")
+all_depths_pi_n_pi_s_M1 = data.frame(data.frame(matrix(ncol = 21, nrow = 0)))
+colnames(all_depths_pi_n_pi_s_M1) <- c("gene","MAG","start","reads_source","gene_length","Ls","Ln","coverage","sites_N","sites_S","n_variants_N","n_variants_S","pi_N","pi_S","theta_N","theta_S","pi_NS","theta_NS","p_N","p_S","p_NS")
+
+for( i in c(1, 3, 5, 7, 10, 25)){
+  temp_snvs <- read_delim(paste0("~/Projects/Sediments/all_depths_M1_3/IS_raw_M1_3_",i,"_SNVs.tsv"))
+
+  temp_snvs <- left_join(temp_snvs, rgwt_m1  %>% filter(reads_source == i) %>% select(gene,MAG, start, gene_length, Ls, Ln, coverage) )
+
+  temp_snvs <- temp_snvs %>%
+    mutate(
+      position_pi =  1 - ((A / position_coverage)**2 + (C / position_coverage)**2 + (T / position_coverage)**2 + (G / position_coverage)**2)
+    )
+  temp_genes_plus_p_pi <- temp_snvs %>%
+    group_by(gene,MAG,start, mutation_type, gene_length, Ls, Ln, coverage) %>%
+    summarise(
+      mean_SNV_pi = mean(position_pi),
+      sites = n(),
+      n_variants = sum(allele_count) - n() # allele_count = 2 -> reference + variant
+    ) %>% filter((mutation_type == "N") | (mutation_type == "S")) %>%
+    pivot_wider(
+      id_cols = c(gene,start, MAG, gene_length, Ls, Ln, coverage),
+      names_from=mutation_type,
+      values_from = c(mean_SNV_pi, sites, n_variants)
+      )
+  temp_genes_plus_pi <- temp_genes_plus_p_pi %>%
+    mutate(
+      pi_N = (mean_SNV_pi_N / Ln),
+      pi_S = (mean_SNV_pi_S / Ls),
+      theta_N = (sites_N / (Ln * log(coverage))),
+      theta_S = (sites_S / (Ls * log(coverage))),
+      p_N = (n_variants_N / Ln),
+      p_S = (n_variants_S / Ls)
+    ) %>%
+    mutate(
+      pi_NS = pi_N / pi_S,
+      theta_NS = theta_N / theta_S,
+      p_NS = p_N / p_S #hahaha
+    ) %>% select(-mean_SNV_pi_N, -mean_SNV_pi_S) %>% #intermediary values not needed in final
+    mutate(reads_source = i)
+  all_depths_pi_n_pi_s_M1 <- rbind(all_depths_pi_n_pi_s_M1, temp_genes_plus_pi)
+}
+all_depths_pi_n_pi_s_M1 %>% write_delim("~/Projects/Sediments/pop_gen_gene_stats_M1_3.tsv",delim="\t")
+
+```
+
+```{r}
+cnames = c("gene","From", "pident","length","mismatch","gapopen","qstart","qend","sstart","send","evalue","bitscore")
+uniref_hits <- read_delim("~/Projects/Sediments/combined_reference_uniref_hits",delim="\t",col_names = cnames) %>% group_by(gene) %>% slice_head(n=1) %>% ungroup()
+uniref_hits %>% select(From) %>% write_delim("~/Projects/Sediments/combined_reference_uniref_hits_filtered_ids",delim="\t")
+
+uniref_ids <- read_delim("~/Projects/Sediments/combined_reference_uniref_annotations.tsv")
+gene_annotations_M5 <- left_join(uniref_hits %>% select(gene, From, pident), uniref_ids) 
+```
+
+```{r}
+phrog_hits <- read_delim("~/Projects/Sediments/phrog_hits_M5_3",col_names = cnames) %>% rename(key = From) #phrog is a phage specific db
+phrog_anno <- read_delim("~/Projects/Sediments/phrog_table.tsv")
+phrogs <- left_join(phrog_hits %>% select(gene, key, pident, evalue), phrog_anno) %>% select(-key, -Location) %>% filter(!is.na(Entry)) 
+phrogs %>% write_delim("~/Projects/Sediments/phrog_annotations.tsv",delim="\t")
+phrog_best <- phrogs %>% rename(protein = `Protein names`, Phrog = Entry, phrog_pident = pident, phrog_eval = evalue, phrog_Accession = Accesssion ) %>% group_by(gene) %>%  slice_min(phrog_eval, n = 1, with_ties = F) %>% ungroup()
+```
+```{r}
+gene_annotations %>% ggplot(aes(x=(Length*3))) + geom_histogram() + xlim(0,5000) + geom_vline(xintercept=500, linetype="dashed", color="red") + geom_vline(xintercept=2000, linetype="dashed", color="red")
+```
+```{r}
+popstat_all_anno_M5 <- left_join(left_join(all_depths_pi_n_pi_s_M5, gene_annotations_M5), phrog_best)
+head(popstat_all_anno_M5)
+```
+```{r}
+length((popstat_all_anno_M5 %>% group_by(gene) %>% slice_head(n=1) %>% ungroup())$gene)
+```
+
+```{r}
+length((popstat_all_anno_M5 %>% group_by(gene) %>% slice_head(n=1) %>% ungroup() %>% filter(((gene_length  >= (Length * 3 * 0.75)) & (gene_length <= (Length * 3 * 1.25)))))$gene)
+```
+
+
+```{r}
+length((popstat_all_anno_M5 %>% group_by(gene) %>% slice_head(n=1) %>% ungroup() %>% filter(((gene_length  >= (Length * 3 * 0.75)) & (gene_length <= (Length * 3 * 1.25))) | (is.na(Length) & ((gene_length > 500) & (gene_length < 2000)))))$gene)
+```
+
+
+```{r}
+popstat_all_anno_filtered_M5 <- popstat_all_anno_M5 %>% filter(((gene_length  >= (Length * 3 * 0.75)) & (gene_length <= (Length * 3 * 1.25))) | (is.na(Length) & ((gene_length > 500) & (gene_length < 2000))))
+```
+
+
+```{r}
+lifestyle_plus_phylo_m5 <- read_delim("~/Projects/Sediments/lifestyles.tsv") %>% mutate(MAG = paste0(genome, ".filtered.fa"))
+```
+
+```{r}
+busco_gene_ids_M5 <- read_delim("~/Projects/Sediments/busco_gene_ids.txt",delim=",")
+popstat_all_anno_filtered_M5 <- popstat_all_anno_filtered_M5 %>% mutate(is_busco = gene %in% busco_gene_ids_M5$gene)
+left_join(popstat_all_anno_filtered_M5,lifestyle_plus_phylo_m5)  %>% group_by(gene, reads_source) %>% slice_head(n=1) %>% ungroup() %>% write_delim("~/Projects/Sediments/MAG_popgen_plus_anno_M5.tsv",delim="\t")
+```
+
+
+
+
+```{r}
+cnames = c("gene","From", "pident","length","mismatch","gapopen","qstart","qend","sstart","send","evalue","bitscore")
+uniref_hits_M1 <- read_delim("~/Projects/Sediments/combined_reference_uniref_hits_M1_3",delim="\t",col_names = cnames) %>% group_by(gene) %>% slice_head(n=1) %>% ungroup()
+uniref_hits_M1 %>% select(From) %>% write_delim("~/Projects/Sediments/combined_reference_uniref_hits_M1_3_filtered",delim="\t")
+
+uniref_ids_M1 <- read_delim("~/Projects/Sediments/combined_reference_uniref_annotations_M1_3.tsv")
+gene_annotations_M1 <- left_join(uniref_hits_M1 %>% select(gene, From, pident), uniref_ids_M1) 
+```
+```{r}
+phrog_hits_M1 <- read_delim("~/Projects/Sediments/combined_phrog_hits_M1_3",col_names = cnames) %>% rename(key = From)
+phrog_anno <- read_delim("~/Projects/Sediments/phrog_table.tsv")
+phrogs_M1 <- left_join(phrog_hits_M1 %>% select(gene, key, pident, evalue), phrog_anno) %>% select(-key, -Location) %>% filter(!is.na(Entry)) 
+phrogs_M1 %>% write_delim("~/Projects/Sediments/phrog_annotations_M1.tsv",delim="\t")
+phrog_best_M1 <- phrogs_M1 %>% rename(protein = `Protein names`, Phrog = Entry, phrog_pident = pident, phrog_eval = evalue, phrog_Accession = Accesssion ) %>% group_by(gene) %>%  slice_min(phrog_eval, n = 1, with_ties = F) %>% ungroup()
+```
+```{r}
+popstat_all_anno_M1 <- left_join(left_join(all_depths_pi_n_pi_s_M1, gene_annotations_M1), phrog_best_M1)
+head(popstat_all_anno_M1)
+```
+
+```{r}
+tail(popstat_all_anno_M1)
+```
+
+```{r}
+popstat_all_anno_M1_filtered <- popstat_all_anno_M1 %>% filter(((gene_length  >= (Length * 3 * 0.75)) & (gene_length <= (Length * 3 * 1.25))) | (is.na(Length) & ((gene_length > 500) & (gene_length < 2000))))
+```
+
+```{r}
+lifestyle_plus_phylo_m1 <- read_delim("~/Projects/Sediments/lifestyles_M1_3.tsv") %>% mutate(MAG = paste0("refs/",genome, ".filtered.fa"))
+head(lifestyle_plus_phylo_m1)
+```
+
+```{r}
+busco_gene_ids_M1 <- read_delim("~/Projects/Sediments/M1_3_busco_gene_ids.txt",delim=",",col_names = c("gene"))
+popstat_all_anno_M1_filtered <- popstat_all_anno_M1_filtered %>% mutate(is_busco = gene %in% busco_gene_ids_M1$gene)
+left_join(popstat_all_anno_M1_filtered,lifestyle_plus_phylo_m1) %>% group_by(gene, reads_source) %>% slice_head(n=1) %>% ungroup() %>% write_delim("~/Projects/Sediments/MAG_popgen_plus_anno_M1.tsv",delim="\t")
+
+```
+This next bootstrap section is used in new_figures.Rmd 
+
+```{r}
+bootstrap_gene <- function(snv_s_count, snv_n_count, ln, ls, covg){
+  nrep_ = 1000
+  pns = rep(NA, nrep_)
+  for(i in seq(1:(1+nrep_))){
+    s = rpois(1, snv_s_count)
+    n = rpois(1, snv_n_count)
+    p_n = n / (ln * log(covg))
+    p_s = s / (ls * log(covg))
+    pnps = p_n / p_s
+    pns[i] = pnps
+  }
+  return(c(mean(pns), sd(pns)))
+}
+bootstrap_gene_v <- Vectorize(bootstrap_gene)
+```
+```{r}
+output <- popstat_all_anno_filtered_M5 %>% filter((theta_NS >= 0.9) & (theta_NS <= 1.1)) %>% rowwise() %>% mutate(bs_mean = bootstrap_gene(sites_S, sites_N, Ln, Ls, coverage)[1], bs_std = bootstrap_gene(sites_S, sites_N, Ln, Ls, coverage)[2]) %>% ungroup()
+```
+```{r}
+output %>% ungroup() %>% filter(!is.infinite(bs_mean)) %>% summarise(mean_of_means = mean(bs_mean, na.rm=T), sd(bs_mean,na.rm=T))
+```
+
+
+```{r}
+data.frame(output) %>% ggplot(aes(x=bs_mean)) + geom_histogram()
+```
+
+```{r}
+1.12 - 3* 0.094
+```
+```{r}
+1.12 + 3* 0.094
+```
+
+
+
+```{r}
+mag_table <- read_delim("~/Projects/Sediments/MAG_table_further_analysis.tsv") #this didn't have CheckM2 data for M1_3 so I add that in in subsq. steps 
+head(mag_table)
+
+```
+```{r}
+check_m2_m5_3 <- read_delim("~/Projects/Sediments/m5_3_checkm2_quality_report.tsv")
+head(check_m2_m5_3)
+```
+```{r}
+check_m2_m1_3 <- read_delim("~/Projects/Sediments/m1_3_checkm2_quality_report.tsv")
+check_m2 <- rbind(check_m2_m5_3, check_m2_m1_3) %>% mutate(MAG = paste0(Name, ".fa")) %>% select(-Name)
+```
+
+
+
+```{r}
+mag_table2 <- left_join(
+    mag_table %>%
+    mutate(`Site + Depth` = paste0(Site, " ",`Assembly Depth`)) %>%
+    select(
+      MAG, Domain, Phylum, Class, Order, Family, Genus, Species, `Site + Depth`,
+      `BUSCO Completeness`, Duplications,
+      )
+    , check_m2 %>% select(MAG, Completeness, Contamination, Genome_Size, Total_Contigs, Max_Contig_Length, Contig_N50, GC_Content)
+  ) %>%
+  rename(
+      `BUSCO Contamination` = Duplications,
+      `CheckM2 Completeness`= Completeness,
+      `CheckM2 Contamination`= Contamination,
+      `Genome size` = Genome_Size,
+      `Total Contigs` = Total_Contigs,
+      `Max contig length` = Max_Contig_Length,
+      N50 = Contig_N50
+      ) %>%
+  mutate(`GC %` = GC_Content * 100) %>%
+  select(-GC_Content) %>% 
+  mutate(`Genome size` = ifelse(`Genome size` > 1E6, paste0(round(`Genome size`/1E6, digits=2),"Mb"),paste0(round(`Genome size`/1000),"Kb"))) %>%
+  mutate(`Max contig length` = paste0(`Max contig length` = round(`Max contig length`/1000),"Kb")) %>%
+  mutate(N50 = paste0(N50 = round(N50 / 1000),"Kb")) %>%
+  filter(!is.na(MAG)) %>%
+  filter((paste0("refs/",MAG) %in% popstat_all_anno_M1_filtered$MAG) | (MAG %in% popstat_all_anno_filtered_M5$MAG)) 
+mag_table2 %>%
+  write_delim("~/Projects/Sediments/MAG_table_2.tsv",delim="\t")
+
+```
