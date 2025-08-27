@@ -125,7 +125,7 @@ phrog_best <- phrogs %>% rename(protein = `Protein names`, Phrog = Entry, phrog_
 gene_annotations %>% ggplot(aes(x=(Length*3))) + geom_histogram() + xlim(0,5000) + geom_vline(xintercept=500, linetype="dashed", color="red") + geom_vline(xintercept=2000, linetype="dashed", color="red")
 ```
 ```{r}
-popstat_all_anno_M5 <- left_join(left_join(all_depths_pi_n_pi_s_M5, gene_annotations_M5), phrog_best)
+popstat_all_anno_M5 <- left_join(left_join(all_depths_pi_n_pi_s_M5, gene_annotations_M5), phrog_best, by = join_by(gene), suffix = c("_uniref","_phrog"))
 head(popstat_all_anno_M5)
 ```
 ```{r}
@@ -176,7 +176,7 @@ phrogs_M1 %>% write_delim("~/Projects/Sediments/phrog_annotations_M1.tsv",delim=
 phrog_best_M1 <- phrogs_M1 %>% rename(protein = `Protein names`, Phrog = Entry, phrog_pident = pident, phrog_eval = evalue, phrog_Accession = Accesssion ) %>% group_by(gene) %>%  slice_min(phrog_eval, n = 1, with_ties = F) %>% ungroup()
 ```
 ```{r}
-popstat_all_anno_M1 <- left_join(left_join(all_depths_pi_n_pi_s_M1, gene_annotations_M1), phrog_best_M1)
+popstat_all_anno_M1 <- left_join(left_join(all_depths_pi_n_pi_s_M1, gene_annotations_M1), phrog_best_M1, by = join_by(gene), suffix = c("_uniref","_phrog"))
 head(popstat_all_anno_M1)
 ```
 
@@ -222,6 +222,12 @@ output <- popstat_all_anno_filtered_M5 %>% filter((theta_NS >= 0.9) & (theta_NS 
 ```
 ```{r}
 output %>% ungroup() %>% filter(!is.infinite(bs_mean)) %>% summarise(mean_of_means = mean(bs_mean, na.rm=T), sd(bs_mean,na.rm=T))
+```
+```{r}
+1.114 + 3*0.0894
+```
+```{r}
+1.114 - 3*0.0894
 ```
 
 

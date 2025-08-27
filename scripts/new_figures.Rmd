@@ -7,19 +7,21 @@ date: "2025-06-19"
 ```{r}
 library(tidyverse)
 library(gt) #seems to be the best table library unless you need it as an image in which case ggpubr::ggtexttable
+library(colorspace)
 ```
 
 
 
 ```{r}
-mag_table <- read_delim("~/Projects/Sediments/MAG_table_2.tsv") 
+mag_table <- read_delim("~/Projects/Sediments/MAG_table_2.tsv") %>% filter(MAG != "M5_3.64.filtered.fa")
 mag_table %>%
   mutate(MAG = str_extract(MAG, "M[0-9]_[0-9]+.[0-9]+")) %>%
-  select(-Species) %>%
+  select(-Species, -Domain) %>%
+  arrange(Phylum, Class, Order, Family, Genus) %>%
   gt() %>%
   tab_footnote(
     footnote = "This is the only MAG annotated with a species: JAAXQD01 sp012974475",
-    locations = cells_body(columns = "Genus", rows = 15)
+    locations = cells_body(columns = "Genus", rows = 5)
     ) %>% opt_stylize( style = 2, color = "gray", add_row_striping = TRUE)
 ```
 
@@ -89,52 +91,52 @@ summary(popgen_plus_anno_m5 %>% filter(!is.infinite(theta_NS)) %>% filter(covera
 
 
 ```{r}
-generate_hex_plot_pi <- function(plot_site, plot_lifestyle, plot_palette, plot_title, plot_df){
-  ph = sequential_hcl(2, palette=plot_palette)[1] # grab the high and low colors from the colorspace library
-  pl = sequential_hcl(2, palette=plot_palette)[2]
-  return(#there is 0 need to save this object inside the function
-    plot_df %>%
-      filter((lifestyle == plot_lifestyle) & (site == plot_site)) %>%
-      ggplot(aes(x=pi_NS_25, y=pi_NS_3)) +
-        geom_hex() +
-        labs(x="πN/πS 25 CmBSF", y="πN/πS 3 CmBSF",title=plot_title) +
-        xlim(0,1) +
-        ylim(0,1) +
-        coord_fixed() + 
-        geom_abline(slope=1, intercept=0, color="black",linewidth=1, linetype="dotted") +
-        scale_fill_continuous(high=ph,low=pl) +# setting the color with aes fill would set each hex the same and remove density info
-        theme_bw() + 
-        theme(text=element_text(family="Helvetica", size=22))
-  )
-}
+# generate_hex_plot_pi <- function(plot_site, plot_lifestyle, plot_palette, plot_title, plot_df){
+#   ph = sequential_hcl(2, palette=plot_palette)[1] # grab the high and low colors from the colorspace library
+#   pl = sequential_hcl(2, palette=plot_palette)[2]
+#   return(#there is 0 need to save this object inside the function
+#     plot_df %>%
+#       filter((lifestyle == plot_lifestyle) & (site == plot_site)) %>%
+#       ggplot(aes(x=pi_NS_25, y=pi_NS_3)) +
+#         geom_hex() +
+#         labs(x="πN/πS 25 CmBSF", y="πN/πS 3 CmBSF",title=plot_title) +
+#         xlim(0,1) +
+#         ylim(0,1) +
+#         coord_fixed() + 
+#         geom_abline(slope=1, intercept=0, color="black",linewidth=1, linetype="dotted") +
+#         scale_fill_continuous(high=ph,low=pl) +# setting the color with aes fill would set each hex the same and remove density info
+#         theme_bw() + 
+#         theme(text=element_text(family="Helvetica", size=22))
+#   )
+# }
 ```
 
 ```{r}
-combined_genes_3_25 <- rbind(popgen_plus_anno_m5 %>% mutate(site="M5"), popgen_plus_anno_m1 %>% mutate(site="M1")) %>% filter((reads_source == 25) |(reads_source == 3)) %>% filter(coverage >= 5) %>% group_by(gene, reads_source) %>% slice_head(n=1) %>% ungroup() %>% select(reads_source, pi_NS, theta_NS, genome, lifestyle, site, gene ) %>% pivot_wider( names_from = reads_source, values_from = c(pi_NS, theta_NS)) %>% filter(!is.na(pi_NS_3) & !is.na(pi_NS_25))
-```
-
-
-```{r}
-m5_sp_p <- generate_hex_plot_pi("M5", "Surface Specialist","RedOr","M5 Surface Spec.",combined_genes_3_25)
-m5_gen_p <- generate_hex_plot_pi("M5", "Generalist","PurpOr","Generalist",combined_genes_3_25)
-m5_ssp_p <- generate_hex_plot_pi("M5", "Subsurface Specialist","Purp","Subsurf. Spec.",combined_genes_3_25)
-m1_sp_p <- generate_hex_plot_pi("M1", "Surface Specialist","RedOr","M1",combined_genes_3_25)
-m1_gen_p <- generate_hex_plot_pi("M1", "Generalist","PurpOr","",combined_genes_3_25)
-m1_ssp_p <- generate_hex_plot_pi("M1", "Subsurface Specialist","Purp","",combined_genes_3_25)
-```
-
-```{r}
-m5_row_p <- cowplot::plot_grid(m5_sp, m5_gen, m5_ssp, nrow=1)
-m1_row_p <- cowplot::plot_grid(m1_sp, m1_gen, m1_ssp, nrow=1)
-panel_2_pi <- cowplot::plot_grid(m5_row,m1_row,ncol=1)
-```
-```{r}
-combined_genes_3_25 %>% group_by(site, lifestyle) %>% summarise(n = n())
+# combined_genes_3_25 <- rbind(popgen_plus_anno_m5 %>% mutate(site="M5"), popgen_plus_anno_m1 %>% mutate(site="M1")) %>% filter((reads_source == 25) |(reads_source == 3)) %>% filter(coverage >= 5) %>% group_by(gene, reads_source) %>% slice_head(n=1) %>% ungroup() %>% select(reads_source, pi_NS, theta_NS, genome, lifestyle, site, gene ) %>% pivot_wider( names_from = reads_source, values_from = c(pi_NS, theta_NS)) %>% filter(!is.na(pi_NS_3) & !is.na(pi_NS_25))
 ```
 
 
 ```{r}
-generate_hex_plot_theta <- function(plot_site, plot_lifestyle, plot_palette, plot_title, plot_df){
+# m5_sp_p <- generate_hex_plot_pi("M5", "Surface Specialist","RedOr","M5 Surface Spec.",combined_genes_3_25)
+# m5_gen_p <- generate_hex_plot_pi("M5", "Generalist","PurpOr","Generalist",combined_genes_3_25)
+# m5_ssp_p <- generate_hex_plot_pi("M5", "Subsurface Specialist","Purp","Subsurf. Spec.",combined_genes_3_25)
+# m1_sp_p <- generate_hex_plot_pi("M1", "Surface Specialist","RedOr","M1",combined_genes_3_25)
+# m1_gen_p <- generate_hex_plot_pi("M1", "Generalist","PurpOr","",combined_genes_3_25)
+# m1_ssp_p <- generate_hex_plot_pi("M1", "Subsurface Specialist","Purp","",combined_genes_3_25)
+```
+
+```{r}
+# m5_row_p <- cowplot::plot_grid(m5_sp_p, m5_gen_p, m5_ssp_p, nrow=1)
+# m1_row_p <- cowplot::plot_grid(m1_sp_p, m1_gen_p, m1_ssp_p, nrow=1)
+# panel_2_pi <- cowplot::plot_grid(m5_row_p,m1_row_p,ncol=1)
+```
+```{r}
+ combined_genes_3_25 %>% group_by(site, lifestyle) %>% summarise(n = n())
+```
+
+
+```{r}
+generate_hex_plot_theta_separate_sites <- function(plot_site, plot_lifestyle, plot_palette, plot_title, plot_df){
   ph = sequential_hcl(2, palette=plot_palette)[1] # grab the high and low colors from the colorspace library
   pl = sequential_hcl(2, palette=plot_palette)[2]
   return(#there is 0 need to save this object inside the function
@@ -154,20 +156,49 @@ generate_hex_plot_theta <- function(plot_site, plot_lifestyle, plot_palette, plo
 }
 ```
 
+
 ```{r}
-m5_sp_t <- generate_hex_plot_theta("M5", "Surface Specialist","RedOr","M5 Surface Spec.",combined_genes_3_25)
-m5_gen_t <- generate_hex_plot_theta("M5", "Generalist","PurpOr","Generalist",combined_genes_3_25)
-m5_ssp_t <- generate_hex_plot_theta("M5", "Subsurface Specialist","Purp","Subsurf. Spec.",combined_genes_3_25)
-m1_sp_t <- generate_hex_plot_theta("M1", "Surface Specialist","RedOr","M1",combined_genes_3_25)
-m1_gen_t <- generate_hex_plot_theta("M1", "Generalist","PurpOr","",combined_genes_3_25)
-m1_ssp_t <- generate_hex_plot_theta("M1", "Subsurface Specialist","Purp","",combined_genes_3_25)
+# m5_sp_t <- generate_hex_plot_theta_separate_sites("M5", "Surface Specialist","RedOr","M5 Surface Spec.",combined_genes_3_25)
+# m5_gen_t <- generate_hex_plot_theta_separate_sites("M5", "Generalist","PurpOr","Generalist",combined_genes_3_25)
+# m5_ssp_t <- generate_hex_plot_theta_separate_sites("M5", "Subsurface Specialist","Purp","Subsurf. Spec.",combined_genes_3_25)
+# m1_sp_t <- generate_hex_plot_theta_separate_sites("M1", "Surface Specialist","RedOr","M1",combined_genes_3_25)
+# m1_gen_t <- generate_hex_plot_theta_separate_sites("M1", "Generalist","PurpOr","",combined_genes_3_25)
+# m1_ssp_t <- generate_hex_plot_theta_separate_sites("M1", "Subsurface Specialist","Purp","",combined_genes_3_25)
 ```
 
 ```{r}
-m5_row_t <- cowplot::plot_grid(m5_sp_t, m5_gen_t, m5_ssp_t, nrow=1)
-m1_row_t <- cowplot::plot_grid(m1_sp_t, m1_gen_t, m1_ssp_t, nrow=1)
-panel_2_theta <- cowplot::plot_grid(m5_row_t,m1_row_t,ncol=1)
+# m5_row_t <- cowplot::plot_grid(m5_sp_t, m5_gen_t, m5_ssp_t, nrow=1)
+# m1_row_t <- cowplot::plot_grid(m1_sp_t, m1_gen_t, m1_ssp_t, nrow=1)
+# panel_2_theta <- cowplot::plot_grid(m5_row_t,m1_row_t,ncol=1)
 ```
+```{r}
+generate_hex_plot_theta <- function(plot_lifestyle, plot_palette, plot_title, plot_df){
+  ph = sequential_hcl(2, palette=plot_palette)[1] # grab the high and low colors from the colorspace library
+  pl = sequential_hcl(2, palette=plot_palette)[2]
+  return(#there is 0 need to save this object inside the function
+    plot_df %>%
+      filter((lifestyle == plot_lifestyle) ) %>%
+      ggplot(aes(x=theta_NS_25, y=theta_NS_3)) +
+        geom_hex() +
+        labs(x="\u03B8N/\u03B8S 25 CmBSF", y="\u03B8N/\u03B8S 3 CmBSF",title=plot_title) +
+        xlim(0,1) +
+        ylim(0,1) +
+        coord_fixed() + 
+        geom_abline(slope=1, intercept=0, color="black",linewidth=1, linetype="dotted") +
+        scale_fill_continuous(high=ph,low=pl) +# setting the color with aes fill would set each hex the same and remove density info
+        theme_bw() + 
+        theme(text=element_text(family="Helvetica", size=22))
+  )
+}
+```
+
+```{r}
+sp_t <- generate_hex_plot_theta("Surface Specialist","RedOr","",combined_genes_3_25)
+gen_t <- generate_hex_plot_theta("Generalist","PurpOr","",combined_genes_3_25)
+ssp_t <- generate_hex_plot_theta("Subsurface Specialist","Purp","",combined_genes_3_25)
+panel_2_theta <- cowplot::plot_grid(sp_t, gen_t, ssp_t,nrow=1)
+```
+
 
 ```{r}
 rbind(popgen_plus_anno_m5 %>% mutate(site = "M5"), popgen_plus_anno_m1 %>% mutate(site = "M1")) %>%
@@ -178,6 +209,8 @@ rbind(popgen_plus_anno_m5 %>% mutate(site = "M5"), popgen_plus_anno_m1 %>% mutat
   theme_bw() + 
   theme(text=element_text(family="Helvetica", size=22))
 ```
+
+
 
 
 
@@ -204,6 +237,7 @@ all_depths_pi_s <- all_depths_pi_n_pi_s %>%
     ln_pi_s = mean(log(pi_S)),
  #   ln_theta_ns = mean(log(theta_NS+ 0.0001)),
     ln_theta_s = mean(log(theta_S)),
+    ln_theta_s_sd = sd(log(theta_S)),
   #  ln_p_ns = mean(log(p_NS+ 0.0001)),
     ln_p_s = mean(log(p_S)),
   #  ln_cn_p_ns = mean(log(cn_p_NS+ 0.0001)),
@@ -231,6 +265,7 @@ all_depths_pi_ns <- all_depths_pi_n_pi_s %>%
     ln_pi_ns = mean(log(pi_NS + 0.0001)),
 #    ln_pi_s = mean(log(pi_S)),
     ln_theta_ns = mean(log(theta_NS+ 0.0001)),
+    ln_theta_ns_sd = sd(log(theta_NS + 0.0001)),
  #   ln_theta_s = mean(log(theta_S)),
     ln_p_ns = mean(log(p_NS+ 0.0001)),
   #  ln_p_s = mean(log(p_S)),
@@ -249,7 +284,7 @@ panel_3_pinpis = all_depths_pi_n_pi_s_summary %>%
     labs(x="Nat. log πS", y="Nat. log πN/πS") + 
     facet_wrap(~site) + 
     theme_bw() +
-    theme(text=element_text(family="Helvetica", size=22))
+    theme(text=element_text(family="Helvetica", size=22), legend.position ="bottom" ) + guides(size="none")
 panel_3_pinpis
 ```
 ```{r}
@@ -271,7 +306,7 @@ panel_3_thetan_thetas = all_depths_pi_n_pi_s_summary %>%
     labs(x="Nat. log \u03B8S", y="Nat. log \u03B8N/\u03B8S", color="CmBSF", size="Log10 # of genes") + 
     facet_wrap(~site) + 
     theme_bw() +
-    theme(text=element_text(family="Helvetica", size=22))
+    theme(text=element_text(family="Helvetica", size=22), legend.position ="bottom" ) + guides(size="none")
 panel_3_thetan_thetas
 ```
 ```{r}
@@ -279,9 +314,11 @@ regression_tnts <- all_depths_pi_n_pi_s_summary %>%
   rename(CmBSF = reads_source) %>% 
   group_by(site, CmBSF) %>%
   summarise(
+    intercept = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][1,1],
     slope = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][2,1],
     r2 = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))$r.squared,
-    p_val = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][2,4]
+    p_val = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][2,4],
+    se =  summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][2,2]
     ) %>% ungroup()
 regression_tnts <- rbind(regression_tnts,
                          all_depths_pi_n_pi_s_summary %>% 
@@ -289,20 +326,139 @@ regression_tnts <- rbind(regression_tnts,
                            rename(CmBSF = reads_source) %>%
                             group_by(site, CmBSF) %>%
                             summarise(
+                              intercept = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][1,1],
                               slope = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][2,1],
                               r2 = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))$r.squared,
-                              p_val = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][2,4]
+                              p_val = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][2,4],
+                              se = summary(lm(data=cur_data(), ln_theta_ns ~ ln_theta_s))[["coefficients"]][2,2]
                               ) %>% ungroup()
                          )
-regression_table_tnts <- ggpubr::ggtexttable(regression_tnts, theme=ggpubr::ttheme("lBlackWhite"), rows=NULL)
+#regression_table_tnts <- ggpubr::ggtexttable(regression_tnts,theme=ggpubr::ttheme("lBlackWhite"), rows=NULL)
+regression_table_tnts <- regression_tnts %>% gt() %>% fmt_number(decimals = 3) %>% opt_stylize( style = 2, color = "gray", add_row_striping = TRUE) %>% tab_footnote(
+    footnote = "2.7*10^-4",
+    locations = cells_body(columns = "p_val", rows = 12)
+    )%>% tab_footnote(
+    footnote = "1.3*10^-5",
+    locations = cells_body(columns = "p_val", rows = 13)
+    )
 regression_table_tnts
 ```
+
+```{r}
+all_depths_pi_n_pi_s_summary %>%
+  select(ln_theta_s, ln_theta_ns) %>%
+  pivot_longer(cols=c(ln_theta_s, ln_theta_ns)) %>%
+  ggplot(aes(x=value, fill=name)) +
+    geom_histogram()#aes(y=..density..)) +. # I never use the overall distribution so it makes no sense to show :)
+    #stat_function(fun = dnorm, args = list(mean = mean(all_depths_pi_n_pi_s_summary$ln_theta_ns), sd = sd(all_depths_pi_n_pi_s_summary$ln_theta_ns)), color="red") + 
+    #stat_function(fun = dnorm, args = list(mean = mean(all_depths_pi_n_pi_s_summary$ln_theta_s), sd = sd(all_depths_pi_n_pi_s_summary$ln_theta_s)), color="blue")
+```
+
+
+```{r}
+bootstrap_regs <- function(mean_NS, mean_S, NS_stds, S_stds, depth, site){
+  nrep_ = 1000
+  slopes = rep(NA, nrep_)
+  intercepts = rep(NA, nrep_)
+  l = length(mean_NS)
+  temp_NS = rep(NA, l)
+  temp_S = rep(NA, l)
+  for(i in seq(1,1+nrep_)){
+    df <- data.frame(NS = temp_NS, S = temp_S)
+    for(j in seq(1:l)){
+        df$NS[j] = rnorm(1,mean=mean_NS[j], sd=NS_stds[j])
+        df$S[j] = rnorm(1,mean=mean_S[j], sd=S_stds[j])
+    }
+    m = lm(NS ~ S, data=df)
+    slopes[i] = m$coefficients[[2]]
+    intercepts[i] = m$coefficients[[1]]
+  }
+  values = data.frame(slope = slopes, intercept=intercepts,  depth=rep(depth,nrep_+1), site=rep(site,nrep_+1))
+  return(values)
+}
+
+
+
+slope_df <- data.frame(slope=numeric(), intercept=numeric(), depth=integer(), site=character())
+
+for (d in c(1,3,7,10,25)){
+   for(s in c("M1","M5")){
+     sub_df <- all_depths_pi_n_pi_s_summary %>% filter((site == s) & (reads_source == d))
+     values = bootstrap_regs(sub_df$ln_theta_ns, sub_df$ln_theta_s, sub_df$ln_theta_ns_sd, sub_df$ln_theta_s_sd, d, s)
+     slope_df <- rbind(slope_df, values)
+   } 
+}
+slope_dist_plot <- slope_df %>% ggplot(aes(x=slope, color=factor(depth))) + geom_density() + facet_wrap(~site, ncol=1) + theme_bw() + labs(color="Depth(cm)", x="Slope") + scale_color_manual(values=c("#E16A86", "#AA9000", "#00AA5A", "#00A6CA", "#B675E0"))
+slope_dist_plot #+ geom_vline(data=filter(slope_df, site=="M1"), aes(xintercept=-0.144), linetype="dotted" ) +
+    #geom_vline(data=filter(slope_df, site=="M1"), aes(xintercept=-0.059), linetype="dotted" ) +
+   #geom_vline(data=filter(slope_df, site=="M5"), aes(xintercept=-0.269), linetype="dotted")
+```
+
+
+```{r}
+rbind(
+  slope_df %>%
+    mutate(depth = "All") %>%
+    group_by(depth, site) %>%
+    summarise(mean_slope = mean(slope),sd_slope = sd(slope), mean_intercept = mean(intercept)) %>% ungroup(),
+  slope_df %>%
+    group_by(depth, site) %>%
+    summarise(mean_slope = mean(slope),sd_slope = sd(slope), mean_intercept = mean(intercept)) %>% ungroup()
+) %>% gt() %>% fmt_number(decimals = 3) %>% opt_stylize( style = 2, color = "gray", add_row_striping = TRUE)
+```
+
+```{r}
+slope_bs_summary <- slope_df %>%
+    group_by(depth, site) %>%
+    summarise(mean_slope = mean(slope),sd_slope = sd(slope), mean_intercept = mean(intercept)) %>% ungroup()
+distro = data.frame()
+for (i in seq(length(slope_bs_summary$mean_slope))){
+  distro <- rbind(distro, data.frame(vals = rgamma(10000, shape=abs(slope_bs_summary$mean_slope[i]), scale=abs(slope_bs_summary$mean_intercept[i])), site = slope_bs_summary$site[i], depth = slope_bs_summary$depth[i]) )
+}
+```
+```{r}
+distro %>% ggplot(aes(x=-vals, fill=factor(depth))) + geom_histogram(binwidth=0.01) + labs(x="selection coefficient", fill="Depth (Cm)") + xlim(-1,0) + scale_color_manual(values=c("#E16A86", "#AA9000", "#00AA5A", "#00A6CA", "#B675E0")) + facet_wrap(~site) +ylim(0,800) + theme_bw() + transition_states(depth, transition_length = 1, state_length = 2) 
+```
+
+```{r}
+distro %>% ggplot(aes(x=-vals, fill=factor(depth))) + geom_density() + labs(x="selection coefficient", fill="Depth (Cm)") + xlim(-1,0) + scale_color_manual(values=c("#E16A86", "#AA9000", "#00AA5A", "#00A6CA", "#B675E0")) + facet_wrap(~site)+ylim(0,800) + theme_bw() + transition_states(depth, transition_length = 1, state_length = 2) 
+```
+
 does coverage contribute?
 ```{r}
 summary(all_depths_pi_n_pi_s_summary %>% filter(site == "M5") %>% lm(data=., formula = ln_theta_ns ~ ln_theta_s + log(coverage)))
 ```
 ```{r}
 summary(all_depths_pi_n_pi_s_summary %>% filter(site == "M5") %>% lm(data=., formula = ln_theta_ns ~ ln_theta_s ))
+```
+```{r}
+left_join(
+  left_join(
+    rbind(
+      popgen_plus_anno_m5 %>% mutate(site = "M5"),
+      popgen_plus_anno_m1 %>% mutate(site = "M1")
+      ),
+    mag_table %>% mutate(genome = str_extract(MAG, "M[15]_3.[0-9]+")) %>% select(genome, Family, Genus)
+    ),
+    read_delim("~/Projects/Sediments/mobileome_annotation_combined_limited.tsv") %>%
+      select(gene, `mobileOG Entry Name`, `Major mobileOG Category`,`Minor mobileOG Categories`,evalue) %>%
+      rename(mobileOG = `mobileOG Entry Name`) %>% 
+      filter(!is.na(`Major mobileOG Category`)) %>%
+      group_by(gene) %>%
+      slice_min(evalue, n=1, with_ties = F)
+  ) %>%
+  filter(reads_source == 25) %>%
+  filter(!is.na(From) | !is.na(Phrog)) %>%
+  slice_max(order_by = theta_NS, n=20, with_ties =F) %>%
+  mutate(genome = str_extract(MAG, "M[15]_[0-9]+\\.[0-9]+")) %>% 
+  select(gene, genome, Family, Genus, gene_length, coverage, sites_N, sites_S, theta_NS, From, `Gene Names_uniref`, `Protein names`, mobileOG, `Major mobileOG Category` ) %>% 
+  rename(PSN = sites_N, PSS = sites_S, `tN/tS` = theta_NS, Uniref90 = From, `Gene names` =`Gene Names_uniref`, `length (nt)` = gene_length)  %>%
+  gt() %>%
+  opt_stylize( style = 2, color = "gray", add_row_striping = TRUE) %>%
+  tab_footnote(
+    footnote = "PSN: Polymorphic Sites Non-synonymous, PSS: Polymorphic Sites Synonymous",
+    locations = cells_column_labels(columns = c("PSS","PSN"))
+    ) %>% opt_stylize( style = 2, color = "gray", add_row_striping = TRUE)
 ```
 
 
@@ -311,9 +467,9 @@ summary(all_depths_pi_n_pi_s_summary %>% filter(site == "M5") %>% lm(data=., for
 bmcs <-  popgen_plus_anno_m5 %>% filter(is_busco) %>% group_by(MAG, reads_source) %>% summarise(bmc = mean(coverage, na.rm=T)) %>% ungroup()
 gene_corr_coefs <- left_join(
   popgen_plus_anno_m5 %>%
-    select(MAG, gene, reads_source, coverage) %>%
+    select(MAG, gene, reads_source, coverage, is_busco) %>%
     pivot_wider(
-      id_cols=c("MAG","gene"),
+      id_cols=c("MAG","gene","is_busco"),
       names_from=reads_source,
       values_from=c(coverage),
       names_prefix = "coverage_") %>%
@@ -329,22 +485,42 @@ gene_corr_coefs <- left_join(
   #slice_head(n=10)
   summarise(corr = cor(coverage, bmc), covg_var = var(coverage / bmc))
 
-gene_corr_coefs <- gene_corr_coefs %>% mutate(is_busco = gene %in% busco_gene_ids_M5$gene)
 head(gene_corr_coefs)
 ```
 
 
 ```{r}
-core_acc_evol_table <- left_join(popgen_plus_anno_m5, gene_corr_coefs) %>%
+core_acc_evol_table <- left_join(
+  popgen_plus_anno_m5 %>%
+    select(genome, reads_source, gene,  theta_NS) %>%
+    pivot_wider(names_from = reads_source, values_from = theta_NS) %>%
+    pivot_longer(cols = where(is.numeric), names_to = "reads_source", values_to = "theta_NS"),
+  gene_corr_coefs) %>%
   filter(MAG %in% c("M5_3.3.filtered.fa","M5_3.252.filtered.fa","M5_3.68.filtered.fa")) %>%
   mutate(pang_status = ifelse(corr >= 0.75, "Core", "Acc.")) %>% #pangenome status
-  mutate(evol_status = ifelse(theta_NS < 0.838, "Conserved", ifelse(theta_NS < 1.4, "Neutral", "Positive"))) %>%
+  mutate(evol_status = ifelse(is.na(theta_NS), "NA", ifelse(theta_NS < 0.843, "Purifying", ifelse(theta_NS < 1.377, "Neutral", "Positive")))) %>%
   group_by(genome, pang_status, evol_status, reads_source) %>%
   summarise(n = n()) %>% 
   ungroup() 
 core_acc_evol_table %>%
   pivot_wider(values_from=n, names_from = c(pang_status, evol_status))
 ```
+```{r}
+#double check we have the same number of genes in core/acc through the core
+core_acc_evol_table %>%
+    pivot_wider(values_from=n, names_from = c(pang_status, evol_status)) %>% group_by(genome, reads_source) %>% summarise(acc = rowSums(across(starts_with("Acc"))), core = rowSums(across(starts_with("Core"))))
+```
+```{r}
+core_acc_evol_table %>%
+    pivot_wider(values_from=n, names_from = c(pang_status, evol_status)) %>%
+  group_by(genome, reads_source) %>%
+  summarise(
+    acc_purif_frac = `Acc._Purifying` / (`Acc._Neutral` + `Acc._Purifying` + `Acc._Positive`),
+    core_purif_frac = Core_Purifying / (Core_Neutral + Core_Purifying + Core_Positive)
+    )
+```
+
+
 ```{r}
 ggpubr::ggtexttable(core_acc_evol_table %>%
                       rename(CmBSF = reads_source) %>%
@@ -398,15 +574,19 @@ reg_df_m5 <- reg_df_m5 %>%
 ppa_m5_clusters <- left_join(ppa_m5_clusters, reg_df_m5, join_by(cluster_number)) %>% filter(MAG %in% c("M5_3.3.filtered.fa","M5_3.252.filtered.fa","M5_3.68.filtered.fa"))
 ```
 ```{r}
+gene_levels <- (ppa_m5_clusters %>%
+  select(reads_source, gene, MAG, log10_fold_change) %>%
+  pivot_wider(id_cols = c(gene, MAG), names_from = reads_source, values_from = log10_fold_change, names_prefix="rel_freq_") %>%
+  arrange(rel_freq_25))$gene
+
 m5_gene_heatmap <- ppa_m5_clusters %>%
-  arrange(desc(coef)) %>%
-  ggplot(aes(x=factor(reads_source), y=gene, fill=log10_fold_change)) +
+  ggplot(aes(x=factor(reads_source), y=factor(gene, levels=gene_levels), fill=log10_fold_change)) +
   geom_tile() +
   facet_wrap(~MAG, ncol=2, scales="free_y") + 
   colorspace::scale_fill_binned_diverging(palette = "Tropic") +
   theme_bw() + 
   theme(axis.text.y = element_blank(), text=element_text(family="Helvetica", size=22))+
-  labs(x = "CmBSF", fill="Relative frequency") 
+  labs(x = "CmBSF", fill="Relative frequency", y = "gene") 
 m5_gene_heatmap
 ```
 
@@ -421,259 +601,259 @@ everything below this has been dropped :(, too bandaid-y and not really solid en
 
 
 
-```{r}
-#one of the contigs in M5_3.252 is on the whole very depth sensitive so I remove it from this plot 
-m5_pvals_plot <- ppa_m5_clusters %>%
-  distinct(cluster_number, .keep_all=T) %>%
-  mutate(genome = gsub(".filtered.fa","",MAG)) %>%
-  mutate(contig = gsub("_[0-9]+?$","", gene)) %>%
-  #filter(contig != "contig_4729") %>%
-  ggplot(aes(x=p_val)) +
-    geom_histogram(binwidth = 0.03) +
-    facet_wrap(~genome) +
-    theme_bw() +
-    labs(x="P-value")
+<!-- ```{r} -->
+<!-- #one of the contigs in M5_3.252 is on the whole very depth sensitive so I remove it from this plot  -->
+<!-- m5_pvals_plot <- ppa_m5_clusters %>% -->
+<!--   distinct(cluster_number, .keep_all=T) %>% -->
+<!--   mutate(genome = gsub(".filtered.fa","",MAG)) %>% -->
+<!--   mutate(contig = gsub("_[0-9]+?$","", gene)) %>% -->
+<!--   #filter(contig != "contig_4729") %>% -->
+<!--   ggplot(aes(x=p_val)) + -->
+<!--     geom_histogram(binwidth = 0.03) + -->
+<!--     facet_wrap(~genome) + -->
+<!--     theme_bw() + -->
+<!--     labs(x="P-value") -->
 
-m5_pvals_plot
-```
+<!-- m5_pvals_plot -->
+<!-- ``` -->
 
-```{r}
-lowest_pvals_m5 <- ppa_m5_clusters %>% filter(MAG == "M5_3.252.filtered.fa") %>% group_by(cluster_number) %>% slice_head(n=1) %>% ungroup() %>% slice_min(p_val , n=5)
-lowest_pvals_m5
-```
-
-
-```{r}
-gene_by_gene_252 <- ppa_m5_clusters %>%
-  filter(gene %in% lowest_pvals_m5$gene) %>%
-  ggplot(aes(y=log10_fold_change, x=factor(reads_source))) +
-    geom_point() +
-    geom_smooth(method="lm",se=F) +
-    facet_wrap(~gene, scales = "free_y") +
-    theme_bw() +
-    labs(x="CmBSF", y="Log10 BUSCO normed. covg.")  
-gene_by_gene_252
-```
-```{r}
-gene_by_gene_fxs <- ggpubr::ggtexttable(
-  popgen_plus_anno_m5 %>%
-    group_by(gene) %>%
-    slice_head(n=1) %>%
-    ungroup() %>%
-    filter(gene %in% lowest_pvals_m5$gene) %>%
-    mutate(Entry = ifelse(is.na(Entry), Phrog, Entry)) %>% 
-    select(gene, Entry, `Protein names`, `Gene Names`),
-  theme=ggpubr::ttheme("lBlackWhite"), rows=NULL)
-gene_by_gene_fxs
-```
-
-```{r}
-top_5_pos <- ppa_m5_clusters %>%
-  filter((coef > 0) & p_val < 0.1, MAG == "M5_3.252.filtered.fa") %>%
-  group_by(gene) %>%
-  slice_head(n= 1) %>%
-  ungroup() %>%
-  slice_min(tibble(p_val, coef), n=5, with_ties = T)
-
-ppa_m5_clusters %>%
-  filter(gene %in% top_5_pos$gene)%>%
-  ggplot(aes(y=log10_fold_change, x=factor(reads_source))) +
-    geom_point() +
-    geom_smooth(method="lm",se=F) +
-    facet_wrap(~gene, scales = "free_y") +
-    theme_bw() +
-    labs(x="log10 CmBSF", y="Log10 BUSCO normed. covg.")
-```
-```{r}
-ggpubr::ggtexttable(
-  popgen_plus_anno_m5 %>%
-    group_by(gene) %>%
-    slice_head(n=1) %>%
-    ungroup() %>%
-    filter(gene %in% top_5_pos$gene) %>%
-    mutate(Entry = ifelse(is.na(Entry), Phrog, Entry)) %>% 
-    select(gene, Entry, `Protein names`, `Gene Names`),
-  theme=ggpubr::ttheme("lBlackWhite"), rows=NULL)
-```
+<!-- ```{r} -->
+<!-- lowest_pvals_m5 <- ppa_m5_clusters %>% filter(MAG == "M5_3.252.filtered.fa") %>% group_by(cluster_number) %>% slice_head(n=1) %>% ungroup() %>% slice_min(p_val , n=5) -->
+<!-- lowest_pvals_m5 -->
+<!-- ``` -->
 
 
+<!-- ```{r} -->
+<!-- gene_by_gene_252 <- ppa_m5_clusters %>% -->
+<!--   filter(gene %in% lowest_pvals_m5$gene) %>% -->
+<!--   ggplot(aes(y=log10_fold_change, x=factor(reads_source))) + -->
+<!--     geom_point() + -->
+<!--     geom_smooth(method="lm",se=F) + -->
+<!--     facet_wrap(~gene, scales = "free_y") + -->
+<!--     theme_bw() + -->
+<!--     labs(x="CmBSF", y="Log10 BUSCO normed. covg.")   -->
+<!-- gene_by_gene_252 -->
+<!-- ``` -->
+<!-- ```{r} -->
+<!-- gene_by_gene_fxs <- ggpubr::ggtexttable( -->
+<!--   popgen_plus_anno_m5 %>% -->
+<!--     group_by(gene) %>% -->
+<!--     slice_head(n=1) %>% -->
+<!--     ungroup() %>% -->
+<!--     filter(gene %in% lowest_pvals_m5$gene) %>% -->
+<!--     mutate(Entry = ifelse(is.na(Entry), Phrog, Entry)) %>%  -->
+<!--     select(gene, Entry, `Protein names`, `Gene Names`), -->
+<!--   theme=ggpubr::ttheme("lBlackWhite"), rows=NULL) -->
+<!-- gene_by_gene_fxs -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- top_5_pos <- ppa_m5_clusters %>% -->
+<!--   filter((coef > 0) & p_val < 0.1, MAG == "M5_3.252.filtered.fa") %>% -->
+<!--   group_by(gene) %>% -->
+<!--   slice_head(n= 1) %>% -->
+<!--   ungroup() %>% -->
+<!--   slice_min(tibble(p_val, coef), n=5, with_ties = T) -->
+
+<!-- ppa_m5_clusters %>% -->
+<!--   filter(gene %in% top_5_pos$gene)%>% -->
+<!--   ggplot(aes(y=log10_fold_change, x=factor(reads_source))) + -->
+<!--     geom_point() + -->
+<!--     geom_smooth(method="lm",se=F) + -->
+<!--     facet_wrap(~gene, scales = "free_y") + -->
+<!--     theme_bw() + -->
+<!--     labs(x="log10 CmBSF", y="Log10 BUSCO normed. covg.") -->
+<!-- ``` -->
+<!-- ```{r} -->
+<!-- ggpubr::ggtexttable( -->
+<!--   popgen_plus_anno_m5 %>% -->
+<!--     group_by(gene) %>% -->
+<!--     slice_head(n=1) %>% -->
+<!--     ungroup() %>% -->
+<!--     filter(gene %in% top_5_pos$gene) %>% -->
+<!--     mutate(Entry = ifelse(is.na(Entry), Phrog, Entry)) %>%  -->
+<!--     select(gene, Entry, `Protein names`, `Gene Names`), -->
+<!--   theme=ggpubr::ttheme("lBlackWhite"), rows=NULL) -->
+<!-- ``` -->
 
 
 
-```{r}
-clusters_M1 <- read_delim("~/Projects/Sediments/clustered_aaai50_cluster_M1.tsv",col_names = c("cluster_rep","cluster_member"),delim="\t")
-clusters_M1 <- clusters_M1 %>% group_by(cluster_rep) %>% mutate(cluster_number = cur_group_id())
-
-ppa_m1_clusters <- left_join(popgen_plus_anno_m1, clusters_M1 %>% select(cluster_member, cluster_number), join_by(gene == cluster_member))
-
-ppa_m1_clusters <- ppa_m1_clusters %>%
-  select(MAG, gene, cluster_number, is_busco, coverage, reads_source) %>%
-  pivot_wider(values_from=coverage, names_from = reads_source,names_prefix="coverage_") %>% 
-  pivot_longer(cols=starts_with("coverage"),names_to = "reads_source",values_to="coverage",names_prefix="coverage_",values_drop_na = FALSE) %>%
-  mutate(coverage = ifelse(is.na(coverage), 0, coverage)) 
-busco_MAG_avg_M1 <- ppa_m1_clusters %>% filter(is_busco) %>%  group_by(MAG, reads_source) %>% summarise(n = n(), bmc = mean(coverage, na.rm=T))
 
 
-ppa_m1_clusters <- left_join(ppa_m1_clusters, busco_MAG_avg_M1, join_by(MAG, reads_source)) %>%
-  filter(MAG %in% c("refs/M1_3.182.filtered.fa","refs/M1_3.148.filtered.fa")) %>%
-  mutate(reads_source = as.integer(reads_source)) %>%
-  mutate(log10_fold_change = log10((coverage + 0.001) / bmc)) %>% 
-  mutate(envt = ifelse(reads_source < 25, "BT", "SRZ"))
+<!-- ```{r} -->
+<!-- clusters_M1 <- read_delim("~/Projects/Sediments/clustered_aaai50_cluster_M1.tsv",col_names = c("cluster_rep","cluster_member"),delim="\t") -->
+<!-- clusters_M1 <- clusters_M1 %>% group_by(cluster_rep) %>% mutate(cluster_number = cur_group_id()) -->
 
-reg_df_m1 <- ppa_m1_clusters %>%
-  group_by(cluster_number) %>%
-  reframe(
-    linear_model_summary = summary(lm(log10_fold_change ~log10(reads_source)))[["coefficients"]][2,]
-  )
+<!-- ppa_m1_clusters <- left_join(popgen_plus_anno_m1, clusters_M1 %>% select(cluster_member, cluster_number), join_by(gene == cluster_member)) -->
 
-reg_df_m1$value_name = rep(c("coef","SE","t_val","p_val"),length(reg_df_m1$cluster_number)/4)
-
-reg_df_m1 <- reg_df_m1 %>%
-  pivot_wider(values_from = linear_model_summary, names_from = value_name) 
-
-ppa_m1_clusters <- left_join(ppa_m1_clusters, reg_df_m1, join_by(cluster_number)) 
-```
-```{r}
-combined_gene_heatmap <- rbind(ppa_m5_clusters, ppa_m1_clusters) %>%
-  mutate(genome = str_extract(MAG, "M[15]_[0-9]+.[0-9]+")) %>%
-  select(gene, genome, reads_source, log10_fold_change) %>%
-  pivot_wider(names_from = reads_source, values_from = log10_fold_change, names_prefix = "l10_fc_") %>%
-  arrange(desc(l10_fc_25)) %>%
-  pivot_longer(matches(".*_[0-9]+"), names_to="reads_source", values_to="log10_fold_change", names_prefix = "l10_fc_") %>%
-  mutate(reads_source = as.integer(reads_source)) %>%
-  ggplot(aes(x=factor(reads_source), y=gene, fill=log10_fold_change)) +
-    geom_tile() +
-    facet_wrap(~genome, ncol=2, scales="free_y") + 
-    colorspace::scale_fill_binned_diverging(palette = "Tropic") +
-    theme_bw() + 
-    theme(axis.text.y = element_blank(), text=element_text(family="Helvetica", size=22))+
-    labs(x = "CmBSF", fill="Log10 Relative frequency") 
-combined_gene_heatmap
-```
+<!-- ppa_m1_clusters <- ppa_m1_clusters %>% -->
+<!--   select(MAG, gene, cluster_number, is_busco, coverage, reads_source) %>% -->
+<!--   pivot_wider(values_from=coverage, names_from = reads_source,names_prefix="coverage_") %>%  -->
+<!--   pivot_longer(cols=starts_with("coverage"),names_to = "reads_source",values_to="coverage",names_prefix="coverage_",values_drop_na = FALSE) %>% -->
+<!--   mutate(coverage = ifelse(is.na(coverage), 0, coverage))  -->
+<!-- busco_MAG_avg_M1 <- ppa_m1_clusters %>% filter(is_busco) %>%  group_by(MAG, reads_source) %>% summarise(n = n(), bmc = mean(coverage, na.rm=T)) -->
 
 
+<!-- ppa_m1_clusters <- left_join(ppa_m1_clusters, busco_MAG_avg_M1, join_by(MAG, reads_source)) %>% -->
+<!--   filter(MAG %in% c("refs/M1_3.182.filtered.fa","refs/M1_3.148.filtered.fa")) %>% -->
+<!--   mutate(reads_source = as.integer(reads_source)) %>% -->
+<!--   mutate(log10_fold_change = log10((coverage + 0.001) / bmc)) %>%  -->
+<!--   mutate(envt = ifelse(reads_source < 25, "BT", "SRZ")) -->
 
-```{r}
-ggpubr::ggtexttable(
-rbind(ppa_m5_clusters, ppa_m1_clusters) %>% 
-  group_by(MAG) %>%
-  summarise(
-    `True Pos Frac.` = 1 - qvalue::qvalue(p = p_val, fdr.level = 0.1)$pi0
-  ),
-theme=ggpubr::ttheme("lBlackWhite"), rows=NULL)
-```
+<!-- reg_df_m1 <- ppa_m1_clusters %>% -->
+<!--   group_by(cluster_number) %>% -->
+<!--   reframe( -->
+<!--     linear_model_summary = summary(lm(log10_fold_change ~log10(reads_source)))[["coefficients"]][2,] -->
+<!--   ) -->
 
+<!-- reg_df_m1$value_name = rep(c("coef","SE","t_val","p_val"),length(reg_df_m1$cluster_number)/4) -->
 
-```{r}
-#one of the contigs in M5_3.252 is on the whole very depth sensitive so I remove it from this plot 
-m1_pvals_plot <- ppa_m1_clusters %>%
-  distinct(cluster_number, .keep_all=T) %>%
-  mutate(genome = gsub(".filtered.fa","",MAG)) %>%
-  mutate(contig = gsub("_[0-9]+?$","", gene)) %>%
-  #filter(contig != "contig_4729") %>%
-  ggplot(aes(x=p_val)) +
-    geom_histogram(binwidth = 0.03) +
-    facet_wrap(~genome) +
-    theme_bw() +
-    labs(x="P-value")
+<!-- reg_df_m1 <- reg_df_m1 %>% -->
+<!--   pivot_wider(values_from = linear_model_summary, names_from = value_name)  -->
 
-m1_pvals_plot
-```
-
-```{r}
-sim_data = rbind(data.frame(p_val = runif(4000), source="H0"), data.frame(p_val = rbeta(400, 1, 10), source="HA"))
-sim_pvals_plot <- sim_data %>% ggplot(aes(x=p_val, fill=source)) + geom_histogram() + ggthemes::scale_fill_colorblind() + labs(x="P-value") + 
-theme(legend.position="none", text=element_text(size=14)) 
-
-cowplot::plot_grid(cowplot::plot_grid(sim_pvals_plot, m1_pvals_plot,rel_widths = c(1,2), rows = 1), m5_pvals_plot, cols=1)
-```
+<!-- ppa_m1_clusters <- left_join(ppa_m1_clusters, reg_df_m1, join_by(cluster_number))  -->
+<!-- ``` -->
+<!-- ```{r} -->
+<!-- combined_gene_heatmap <- rbind(ppa_m5_clusters, ppa_m1_clusters) %>% -->
+<!--   mutate(genome = str_extract(MAG, "M[15]_[0-9]+.[0-9]+")) %>% -->
+<!--   select(gene, genome, reads_source, log10_fold_change) %>% -->
+<!--   pivot_wider(names_from = reads_source, values_from = log10_fold_change, names_prefix = "l10_fc_") %>% -->
+<!--   arrange(desc(l10_fc_25)) %>% -->
+<!--   pivot_longer(matches(".*_[0-9]+"), names_to="reads_source", values_to="log10_fold_change", names_prefix = "l10_fc_") %>% -->
+<!--   mutate(reads_source = as.integer(reads_source)) %>% -->
+<!--   ggplot(aes(x=factor(reads_source), y=gene, fill=log10_fold_change)) + -->
+<!--     geom_tile() + -->
+<!--     facet_wrap(~genome, ncol=2, scales="free_y") +  -->
+<!--     colorspace::scale_fill_binned_diverging(palette = "Tropic") + -->
+<!--     theme_bw() +  -->
+<!--     theme(axis.text.y = element_blank(), text=element_text(family="Helvetica", size=22))+ -->
+<!--     labs(x = "CmBSF", fill="Log10 Relative frequency")  -->
+<!-- combined_gene_heatmap -->
+<!-- ``` -->
 
 
 
-```{r}
-scaffold_info_m5 = read_delim("~/Projects/Sediments/IS_raw_M5_3_3_scaffold_info.tsv") %>% select(scaffold, length) %>% arrange(desc(length))
-scaffold_info_m1 = read_delim("~/Projects/Sediments/IS_raw_M1_3_3_scaffold_info.tsv") %>% select(scaffold, length) %>% arrange(desc(length))
-```
+<!-- ```{r} -->
+<!-- ggpubr::ggtexttable( -->
+<!-- rbind(ppa_m5_clusters, ppa_m1_clusters) %>%  -->
+<!--   group_by(MAG) %>% -->
+<!--   summarise( -->
+<!--     `True Pos Frac.` = 1 - qvalue::qvalue(p = p_val, fdr.level = 0.1)$pi0 -->
+<!--   ), -->
+<!-- theme=ggpubr::ttheme("lBlackWhite"), rows=NULL) -->
+<!-- ``` -->
 
-```{r}
-make_running_length <- function(genes_df, scaffold_df, mag_name, regression_df){
-  rl <- left_join(
-    genes_df %>% filter(reads_source==3, MAG==mag_name),
-    scaffold_df %>% rename(scaff_length = length)
-  ) %>% select(scaffold, scaff_length, MAG) %>%
-  group_by(scaffold) %>% slice(1) %>% ungroup() %>%
-  arrange(desc(scaff_length)) %>% 
-  mutate(scaffold_nb = row_number()) %>%
-  mutate(scaff_rl = cumsum(scaff_length))
-  rl <- rl %>% mutate(scaff_rl2 = lag(scaff_rl)) %>% mutate(scaff_rl2 = ifelse(is.na(scaff_rl2),0, scaff_rl2)) %>% select(-scaff_rl)
-  return(rl)
-}
-make_zoom_plot <- function(genes_df, scaff_df, myMAG,regression_df, zoom_contig){
-  rl = make_running_length(genes_df, scaff_df, myMAG) # running length
-  mag_genes_df <- left_join(
-                    genes_df %>% filter(MAG == myMAG), 
-                    rl ) %>%
-                  mutate(running_length = scaff_rl2 + start) %>%
-                  rename(ctg_start = scaff_rl2)
-  if(!("bmc" %in% colnames(mag_genes_df))){
-    busco_MAG_avg <- genes_df %>% filter(is_busco) %>%  group_by(MAG, reads_source) %>% summarise(n = n(), bmc = mean(coverage, na.rm=T))
-    mag_genes_df <- left_join(mag_genes_df, busco_MAG_avg)
-  }
-  
-  mag_genes_df <- mag_genes_df %>%
-    filter(MAG == myMAG) %>%
-    filter((reads_source == 3) | (reads_source == 25)) %>%
-    select(gene, MAG, reads_source, coverage, bmc, running_length, ctg_start, scaff_length, scaffold, scaffold_nb, is_busco) %>%
-    pivot_wider(names_from = reads_source, values_from = c(coverage,bmc)) %>%
-    mutate(delta_c = log10(coverage_3 / bmc_3) - log10(coverage_25 / bmc_25)) %>%
-    arrange(desc(scaff_length))
-  
-  mag_genes_df <- left_join(mag_genes_df, regression_df %>% select(gene, p_val))
-  
-  #me_terms = 'recombinase|excise|exciase| excisionase|recombination|transposase|lysogenic|prophage|temperate|integrase|repressor'
-  #mag_genes_df <- left_join(mag_genes_df, annotation_df) %>% mutate(is_me_gene = grepl(me_terms ,`Protein names`,ignore.case = T))
-  mag_genes_df <- mag_genes_df %>% 
-   # mutate(status = ifelse(is_busco, "BUSCO", ifelse(p_val < 0.1, ifelse(is_me_gene,"Env. Sens. ME","Env. Sensative"), ifelse(is_me_gene, "ME gene", "Others"))))
-    mutate(status = ifelse(is_busco, "BUSCO", ifelse(p_val < 0.1, "Env. Sens.", "Others")))
-  
-  myplot <- mag_genes_df %>% filter(!is.na(scaffold_nb)) %>% ggplot(aes(x=running_length, y = -delta_c)) +
-    geom_point(aes(color=status)) + 
-    scale_color_manual(name="Gene Status",values=c("#E16A86", "#00AD9A", "grey")) +
-    #scale_color_manual(name="Gene Status",values=c("#E16A86","#909800", "#00AD9A", "#9183E6","grey")) +#colors from colorspace dark3
-    ggnewscale::new_scale_color() +
-    geom_rug(
-      aes(
-        x = running_length,
-        length=scaff_length,
-        color=ifelse(scaffold_nb %% 2 == 0, "even","odd")
-        #color=ifelse(scaffold ==zoom_contig, zoom_contig,ifelse(scaffold_nb %% 2 == 0, "even","odd"))
-        ), 
-      sides="b",
-      linewidth=1.5
-    ) +
-    scale_color_manual(name="scaffolds",values=c("black","grey")) +
-    #scale_color_manual(name="scaffolds",values=c("blue","black","grey")) +
-    geom_vline(aes(xintercept=ctg_start),linetype="dotted") + 
-    ggforce::facet_zoom(xy = scaffold == zoom_contig, horizontal = F) +
-    labs(x="Artificial coordinates (bp)",y="Abs. change in Rel. Abd. (3 vs 25 CmBSF)") 
-  return(myplot)
-}
-```
 
-```{r}
-zoom_plot_m5_252_3 <-make_zoom_plot(popgen_plus_anno_m5, scaffold_info_m5, "M5_3.252.filtered.fa",ppa_m5_clusters, "contig_1291")
-zoom_plot_m5_252_3 
-```
-```{r}
-aligned_br <- cowplot::align_plots(gene_by_gene_252,gene_by_gene_fxs , align='v', axis='t')
-bottom_row = cowplot::plot_grid(aligned_br[[1]], aligned_br[[2]],nrow=1, labels = c("B", "C"))
-bottom_row
-```
+<!-- ```{r} -->
+<!-- #one of the contigs in M5_3.252 is on the whole very depth sensitive so I remove it from this plot  -->
+<!-- m1_pvals_plot <- ppa_m1_clusters %>% -->
+<!--   distinct(cluster_number, .keep_all=T) %>% -->
+<!--   mutate(genome = gsub(".filtered.fa","",MAG)) %>% -->
+<!--   mutate(contig = gsub("_[0-9]+?$","", gene)) %>% -->
+<!--   #filter(contig != "contig_4729") %>% -->
+<!--   ggplot(aes(x=p_val)) + -->
+<!--     geom_histogram(binwidth = 0.03) + -->
+<!--     facet_wrap(~genome) + -->
+<!--     theme_bw() + -->
+<!--     labs(x="P-value") -->
 
-```{r}
-combined_plot <- cowplot::plot_grid(zoom_plot_m5_252_3, bottom_row, nrow=2, labels= c("A",""))
-combined_plot
-```
+<!-- m1_pvals_plot -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- sim_data = rbind(data.frame(p_val = runif(4000), source="H0"), data.frame(p_val = rbeta(400, 1, 10), source="HA")) -->
+<!-- sim_pvals_plot <- sim_data %>% ggplot(aes(x=p_val, fill=source)) + geom_histogram() + ggthemes::scale_fill_colorblind() + labs(x="P-value") +  -->
+<!-- theme(legend.position="none", text=element_text(size=14))  -->
+
+<!-- cowplot::plot_grid(cowplot::plot_grid(sim_pvals_plot, m1_pvals_plot,rel_widths = c(1,2), rows = 1), m5_pvals_plot, cols=1) -->
+<!-- ``` -->
+
+
+
+<!-- ```{r} -->
+<!-- scaffold_info_m5 = read_delim("~/Projects/Sediments/IS_raw_M5_3_3_scaffold_info.tsv") %>% select(scaffold, length) %>% arrange(desc(length)) -->
+<!-- scaffold_info_m1 = read_delim("~/Projects/Sediments/IS_raw_M1_3_3_scaffold_info.tsv") %>% select(scaffold, length) %>% arrange(desc(length)) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- make_running_length <- function(genes_df, scaffold_df, mag_name, regression_df){ -->
+<!--   rl <- left_join( -->
+<!--     genes_df %>% filter(reads_source==3, MAG==mag_name), -->
+<!--     scaffold_df %>% rename(scaff_length = length) -->
+<!--   ) %>% select(scaffold, scaff_length, MAG) %>% -->
+<!--   group_by(scaffold) %>% slice(1) %>% ungroup() %>% -->
+<!--   arrange(desc(scaff_length)) %>%  -->
+<!--   mutate(scaffold_nb = row_number()) %>% -->
+<!--   mutate(scaff_rl = cumsum(scaff_length)) -->
+<!--   rl <- rl %>% mutate(scaff_rl2 = lag(scaff_rl)) %>% mutate(scaff_rl2 = ifelse(is.na(scaff_rl2),0, scaff_rl2)) %>% select(-scaff_rl) -->
+<!--   return(rl) -->
+<!-- } -->
+<!-- make_zoom_plot <- function(genes_df, scaff_df, myMAG,regression_df, zoom_contig){ -->
+<!--   rl = make_running_length(genes_df, scaff_df, myMAG) # running length -->
+<!--   mag_genes_df <- left_join( -->
+<!--                     genes_df %>% filter(MAG == myMAG),  -->
+<!--                     rl ) %>% -->
+<!--                   mutate(running_length = scaff_rl2 + start) %>% -->
+<!--                   rename(ctg_start = scaff_rl2) -->
+<!--   if(!("bmc" %in% colnames(mag_genes_df))){ -->
+<!--     busco_MAG_avg <- genes_df %>% filter(is_busco) %>%  group_by(MAG, reads_source) %>% summarise(n = n(), bmc = mean(coverage, na.rm=T)) -->
+<!--     mag_genes_df <- left_join(mag_genes_df, busco_MAG_avg) -->
+<!--   } -->
+
+<!--   mag_genes_df <- mag_genes_df %>% -->
+<!--     filter(MAG == myMAG) %>% -->
+<!--     filter((reads_source == 3) | (reads_source == 25)) %>% -->
+<!--     select(gene, MAG, reads_source, coverage, bmc, running_length, ctg_start, scaff_length, scaffold, scaffold_nb, is_busco) %>% -->
+<!--     pivot_wider(names_from = reads_source, values_from = c(coverage,bmc)) %>% -->
+<!--     mutate(delta_c = log10(coverage_3 / bmc_3) - log10(coverage_25 / bmc_25)) %>% -->
+<!--     arrange(desc(scaff_length)) -->
+
+<!--   mag_genes_df <- left_join(mag_genes_df, regression_df %>% select(gene, p_val)) -->
+
+<!--   #me_terms = 'recombinase|excise|exciase| excisionase|recombination|transposase|lysogenic|prophage|temperate|integrase|repressor' -->
+<!--   #mag_genes_df <- left_join(mag_genes_df, annotation_df) %>% mutate(is_me_gene = grepl(me_terms ,`Protein names`,ignore.case = T)) -->
+<!--   mag_genes_df <- mag_genes_df %>%  -->
+<!--    # mutate(status = ifelse(is_busco, "BUSCO", ifelse(p_val < 0.1, ifelse(is_me_gene,"Env. Sens. ME","Env. Sensative"), ifelse(is_me_gene, "ME gene", "Others")))) -->
+<!--     mutate(status = ifelse(is_busco, "BUSCO", ifelse(p_val < 0.1, "Env. Sens.", "Others"))) -->
+
+<!--   myplot <- mag_genes_df %>% filter(!is.na(scaffold_nb)) %>% ggplot(aes(x=running_length, y = -delta_c)) + -->
+<!--     geom_point(aes(color=status)) +  -->
+<!--     scale_color_manual(name="Gene Status",values=c("#E16A86", "#00AD9A", "grey")) + -->
+<!--     #scale_color_manual(name="Gene Status",values=c("#E16A86","#909800", "#00AD9A", "#9183E6","grey")) +#colors from colorspace dark3 -->
+<!--     ggnewscale::new_scale_color() + -->
+<!--     geom_rug( -->
+<!--       aes( -->
+<!--         x = running_length, -->
+<!--         length=scaff_length, -->
+<!--         color=ifelse(scaffold_nb %% 2 == 0, "even","odd") -->
+<!--         #color=ifelse(scaffold ==zoom_contig, zoom_contig,ifelse(scaffold_nb %% 2 == 0, "even","odd")) -->
+<!--         ),  -->
+<!--       sides="b", -->
+<!--       linewidth=1.5 -->
+<!--     ) + -->
+<!--     scale_color_manual(name="scaffolds",values=c("black","grey")) + -->
+<!--     #scale_color_manual(name="scaffolds",values=c("blue","black","grey")) + -->
+<!--     geom_vline(aes(xintercept=ctg_start),linetype="dotted") +  -->
+<!--     ggforce::facet_zoom(xy = scaffold == zoom_contig, horizontal = F) + -->
+<!--     labs(x="Artificial coordinates (bp)",y="Abs. change in Rel. Abd. (3 vs 25 CmBSF)")  -->
+<!--   return(myplot) -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- zoom_plot_m5_252_3 <-make_zoom_plot(popgen_plus_anno_m5, scaffold_info_m5, "M5_3.252.filtered.fa",ppa_m5_clusters, "contig_1291") -->
+<!-- zoom_plot_m5_252_3  -->
+<!-- ``` -->
+<!-- ```{r} -->
+<!-- aligned_br <- cowplot::align_plots(gene_by_gene_252,gene_by_gene_fxs , align='v', axis='t') -->
+<!-- bottom_row = cowplot::plot_grid(aligned_br[[1]], aligned_br[[2]],nrow=1, labels = c("B", "C")) -->
+<!-- bottom_row -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- combined_plot <- cowplot::plot_grid(zoom_plot_m5_252_3, bottom_row, nrow=2, labels= c("A","")) -->
+<!-- combined_plot -->
+<!-- ``` -->
 
 
 

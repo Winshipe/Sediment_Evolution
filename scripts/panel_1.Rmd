@@ -61,6 +61,7 @@ asv_heatmap <- amp_heatmap(d2,
             color_vector = c("lightblue", "darkmagenta"),
             plot_colorscale = "sqrt",
             plot_values = FALSE) +
+  #theme(text=element_text(family="Helvetica", size=22))+
   theme(axis.text.x = element_text(angle = 45, size=10, vjust = 1),
         axis.text.y = element_text(size=8),
         legend.position="right")
@@ -110,54 +111,149 @@ raw_genome_M1_3 <- rbind(raw_genome_1, raw_genome_3, raw_genome_7, raw_genome_10
 
 left_join(raw_genome_M5_3, lifestyle_plus_phylo)
 
-mag_ab_plot <- left_join(rbind(raw_genome_M5_3,raw_genome_M1_3) %>% mutate(genome = gsub(".filtered.fa","",gsub("refs/","",genome))), mags_further_analysis %>% mutate(genome = gsub(".filtered.fa","",MAG))) %>% filter(!is.na(Family)) %>% mutate(Genus = ifelse((Genus == "NA") | is.na(Genus),paste("Uncl.", Family),Genus)) %>% mutate(name = paste0(genome, " (", Genus, ")")) %>% mutate(site = gsub("_.*","",genome)) %>% ggplot(aes(x=factor(reads_source), y=name, fill=log10(coverage))) + geom_tile(width=0.9) + scale_fill_continuous(high="darkmagenta",low="lightblue")  + scale_x_discrete(guide = guide_axis(angle = 60)) + theme(axis.title = element_text(size=22), legend.title = element_text(size=16), axis.text.y=element_text(size=14)) + labs(y="MAGs", x="Reads Source (CmBSF)", color="Log10 Coverage") + scale_y_discrete(limits=rev) + facet_wrap(~site,scales="free_y",ncol=1) + theme(strip.text.x = element_blank())
+mags_further_analysis <- mags_further_analysis %>% mutate(genome = gsub(".filtered.fa","",MAG)) %>% filter(!is.na(Family))
+mag_ab_plot <- left_join(
+  rbind(raw_genome_M5_3,raw_genome_M1_3) %>%
+    mutate(genome = gsub(".filtered.fa","",gsub("refs/","",genome))),
+  mags_further_analysis) %>%
+  mutate(Genus = ifelse((Genus == "NA") | is.na(Genus),paste("Uncl.", Family),Genus)) %>%
+  mutate(name = paste0(genome, " (", Genus, ")")) %>%
+  mutate(site = gsub("_.*","",genome)) %>%
+  ggplot(aes(x=factor(reads_source), y=name, fill=log10(coverage))) +
+    geom_tile(width=0.9) +
+    scale_fill_continuous(high="darkmagenta",low="lightblue") +
+    scale_x_discrete(guide = guide_axis(angle = 60)) +
+    theme(axis.title = element_text(size=22), legend.title = element_text(size=16), axis.text.y=element_text(size=14)) +
+    labs(y="MAGs", x="Reads Source (CmBSF)", color="Log10 Coverage") +
+    scale_y_discrete(limits=rev) +
+    facet_wrap(~site,scales="free_y",ncol=1) +
+    theme(strip.text.x = element_blank())
 
 mag_ab_plot
 ```
 Here I generate the tree using the ggtree library, I remove MAGs with >15% contamination or <5% completeness from the coloring and abundance 
+```{r}
+m1_coverages <- rbind(
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M1_3_1.txt") %>% mutate(reads_source = 1),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M1_3_3.txt") %>% mutate(reads_source = 3),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M1_3_5.txt") %>% mutate(reads_source = 5),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M1_3_7.txt") %>% mutate(reads_source = 7),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M1_3_10.txt") %>% mutate(reads_source = 10),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M1_3_25.txt") %>% mutate(reads_source = 25)
+    ) %>% mutate(site = "M1")
+
+m5_coverages <- rbind(
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M5_3_1.txt") %>% mutate(reads_source = 1),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M5_3_3.txt") %>% mutate(reads_source = 3),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M5_3_5.txt") %>% mutate(reads_source = 5),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M5_3_7.txt") %>% mutate(reads_source = 7),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M5_3_10.txt") %>% mutate(reads_source = 10),
+    read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/coverage_M5_3_25.txt") %>% mutate(reads_source = 25)
+    ) %>% mutate(site = "M5")
+
+stb_m5_3 <- read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/combined_reference_M5_3.stb",col_names = c("scaffold","genome"))
+stb_m1_3 <- read_delim("~/Projects/Sediments/all_mags_all_depths/coverages/combined_reference_M1_3.stb",col_names = c("scaffold","genome"))
+new_abundances <- rbind(
+  left_join(m1_coverages %>% rename(scaffold = `#rname`), stb_m1_3),
+  left_join(m5_coverages %>% rename(scaffold = `#rname`), stb_m5_3)
+  )
+new_coverages <- new_abundances %>%
+  select(genome, scaffold, site, reads_source, meandepth, endpos) %>%
+  rename(scaff_len = endpos) %>%
+  pivot_wider(
+    id_cols=c(genome, site, scaffold, scaff_len),
+    names_from = reads_source,
+    values_from = meandepth,
+    values_fill = 0,
+    names_prefix = "cov_depth_") %>% 
+  pivot_longer(cols = starts_with("cov_depth_"), names_to = "reads_source", values_to = "meandepth", names_prefix = "cov_depth_") %>% 
+  mutate(reads_source = as.integer(reads_source)) %>%
+  group_by(genome, site, reads_source) %>% 
+  summarise(
+    mean_cov = weighted.mean(meandepth, scaff_len),
+    length = sum(scaff_len)
+  ) 
+
+```
+```{r}
+new_coverages %>% filter((genome %in% raw_genome_M1_3$genome)|(paste0("refs/",genome) %in% raw_genome_M5_3$genome)) %>% ggplot(aes(x=as.factor(reads_source), y = genome, fill=mean_cov)) + geom_tile() + colorspace::scale_fill_continuous_sequential(palette = "ag_Sunset") + facet_wrap(~site, scales="free")
+```
+
+```{r}
+summed_len = sum(new_coverages$length)
+summed_covg = sum(new_coverages$mean_cov)
+new_rel_abs = new_coverages %>% mutate(genome = str_extract(genome,"M[15]_3.[0-9]+")) %>% mutate(ra = mean_cov / summed_covg) %>% pivot_wider(id_cols=c(genome, site), names_from = reads_source, values_from = c(ra, mean_cov))
+```
+```{r}
+linnean = c("domain","phylum","class","order","family","genus","species")
+phylogeny_M5_3 <- read_delim("~/Projects/Sediments/M5_3.gtdbtk.bac120.summary.tsv")
+phylogeny_M1_3 <- read_delim("~/Projects/Sediments/M1_3.gtdbtk.bac120.summary.tsv")
+phylogeny <- rbind(phylogeny_M1_3, phylogeny_M5_3) %>%
+  mutate(genome = str_extract(user_genome,"M[15]_3.[0-9]+")) %>%
+  select(genome, classification) %>%
+  separate_wider_delim(
+    cols=classification,
+    delim=";",
+    names =linnean,
+    too_few="align_start"
+    ) %>%
+  mutate(across( all_of(linnean), ~str_extract(.x,"(?<=[a-z]__).+"))) %>% 
+  mutate(phylum = ifelse(is.na(phylum),"Unclassified",phylum))
+
+new_rel_abs <- left_join(new_rel_abs, phylogeny) %>% ungroup()
+```
+```{r}
+quality_m5_3 <- read_delim("~/Projects/Sediments/checkm2_results_M5_3_all.tsv")
+quality_m1_3 <- read_delim("~/Projects/Sediments/checkm2_results_M1_3_all.tsv")
+quality <- rbind(quality_m5_3, quality_m1_3) %>% mutate(genome =str_extract(Name,"M[15]_3.[0-9]+") ) %>% select(genome, Completeness, Contamination)
+
+new_rel_abs <- left_join(new_rel_abs, quality)
+```
+
+
 
 ```{r}
 library("treeio")
 library("ggtree")
 
-levels_ <- c("Acidobacteriota","Actinobacteriota","Atribacterota","Bacteroidota","Bipolaricaulota","BMS3Abin14","Calditrichota","Campylobacterota","Chloroflexota","Desulfobacterota","Gemmatimonadota","Hydrogenedentota","JABDJQ01","Krumholzibacteriota","KSB1","Methylomirabilota","Myxococcota","Myxococcota_A","Nitrospirota","Patescibacteria","Planctomycetota","Poribacteria","Proteobacteria","Spirochaetota","Verrucomicrobiota","Zixibacteria","All_Archaea")
+levels_ <- c("Acidobacteriota","Actinobacteriota","Atribacterota","Bacteroidota","Bipolaricaulota","BMS3Abin14","Calditrichota","Campylobacterota","Chloroflexota","Desulfobacterota","Gemmatimonadota","Hydrogenedentota","JABDJQ01","Krumholzibacteriota","KSB1","Methylomirabilota","Myxococcota","Myxococcota_A","Nitrospirota","Patescibacteria","Planctomycetota","Poribacteria","Proteobacteria","Spirochaetota","Verrucomicrobiota","Zixibacteria")
 polychrome_27 <- c("#358d78","#a3583b","#b400fe","#fb0000","#00fe16","#fe1cbe","#f9bbfb","#ece500","#2aabff","#ff781c","#eedfb2","#45427e","#1cfdb4","#c1004f","#6aa526","#841662","#1ce8fd","#fc72fe","#faaf00","#322ac4","#937881","#cae5f6","#870da0","#fd90b4","#685d0d","#aff822","#b19afc")
 names(polychrome_27) <- levels_
 
-m5_3_quality <- read_delim("~/Projects/Sediments/M5_3_MAG_completeness_contamination.tsv",delim="\t") %>% mutate(user_genome = gsub(".fa","",MAG))
-m5_25_quality <- read_delim("~/Projects/Sediments/M5_25_MAG_completeness_contamination.tsv",delim="\t") %>% mutate(user_genome = gsub(".fa","",MAG))
+#m5_3_quality <- read_delim("~/Projects/Sediments/M5_3_MAG_completeness_contamination.tsv",delim="\t") %>% mutate(user_genome = gsub(".fa","",MAG))
+#m5_25_quality <- read_delim("~/Projects/Sediments/M5_25_MAG_completeness_contamination.tsv",delim="\t") %>% mutate(user_genome = gsub(".fa","",MAG))
 
-m5_tree <- read.tree("~/Projects/Sediments/combined_M5_tree.nwk")
-m5_tree$tip.label = gsub(".filtered","",m5_tree$tip.label)
-m5_abundances <- read.table("~/Projects/Sediments/combined_M5_w_abundance.tsv",header=T, sep="\t")
-m5_abundances <- left_join(m5_abundances, rbind(m5_3_quality,m5_25_quality))
-m5_abundances_f <- m5_abundances %>% filter(Duplications < 15, Completeness > 5)
-m5_abundances_f <- m5_abundances_f %>%
-  mutate(
-    Phylum = gsub("p__","",Phylum),
-    Class = gsub("c__","",Class),
-    Family = gsub("f__","",Family),
-    Genus =gsub("g__","",Genus),
-    Species = gsub("s__","",Species)
-    ) %>% mutate(user_genome = gsub(".filtered","",user_genome))
-temp2 <- m5_abundances_f %>% group_split(Phylum)
+sed_tree <- read.tree("~/Projects/Sediments/combined_sites_bacteria_tree_vft.nwk")
+sed_tree$tip.label = gsub(".filtered","",sed_tree$tip.label)
+# m5_abundances <- read.table("~/Projects/Sediments/combined_M5_w_abundance.tsv",header=T, sep="\t")
+# m5_abundances <- left_join(m5_abundances, rbind(m5_3_quality,m5_25_quality))
+# m5_abundances_f <- m5_abundances %>% filter(Duplications < 15, Completeness > 5)
+# m5_abundances_f <- m5_abundances_f %>%
+#   mutate(
+#     Phylum = gsub("p__","",Phylum),
+#     Class = gsub("c__","",Class),
+#     Family = gsub("f__","",Family),
+#     Genus =gsub("g__","",Genus),
+#     Species = gsub("s__","",Species)
+#     ) %>% mutate(user_genome = gsub(".filtered","",user_genome))
+temp2 <- new_rel_abs %>% group_split(phylum)
 l5 <- list()
 for (tib in temp2){
-    l5[[tib$Phylum[1]]] = tib$user_genome
+    l5[[tib$phylum[1]]] = tib$genome
 }
 
-m5_tree_w_phyla <- groupOTU(m5_tree, l5, "Phylum_")
-m5_tree_colored <- ggtree(m5_tree_w_phyla, layout="circular",aes(color=Phylum_),key_glyph="rect")
-m5_rel_abs <- m5_abundances_f %>% select("user_genome",starts_with("ra")) %>% column_to_rownames("user_genome")
-m5_tree_w_ab <- gheatmap(m5_tree_colored, data=m5_rel_abs, high="darkmagenta",low="lightblue",width = 0.1, font.size = 0.1) 
-ctb <- read_table("~/Projects/Sediments/all_depths/combined_reference_M5_3.stb",col_names = c("scaffold","MAG"))
-ctb <- ctb %>% mutate(MAG = str_replace(MAG, ".filtered.fa",""))
-m5_combined_tree_w_ab_circle <- m5_tree_w_ab + geom_tiplab(aes(subset=(label %in% c(ctb$MAG))),offset=0.17, size=4, align=T, linesize = 0.01) + scale_color_manual(name="Phylum",values=polychrome_27) + theme(legend.position="right", legend.spacing.y = unit(0,"mm")) + guides(
+sed_tree_w_phyla <- groupOTU(sed_tree, l5, "Phylum_")
+sed_tree_colored <- ggtree(sed_tree_w_phyla, layout="circular",aes(color=Phylum_),key_glyph="rect")
+new_rel_abs2 <- new_rel_abs %>% select("genome",starts_with("ra")) %>% column_to_rownames("genome")
+sed_tree_w_ab <- gheatmap(sed_tree_colored, data=new_rel_abs2, high="darkmagenta",low="lightblue",width = 0.1, font.size = 0.1) 
+# ctb <- read_table("~/Projects/Sediments/all_depths/combined_reference_M5_3.stb",col_names = c("scaffold","MAG"))
+# ctb <- ctb %>% mutate(MAG = str_replace(MAG, ".filtered.fa",""))
+sed_tree_w_ab_circle <- sed_tree_w_ab + geom_tiplab(aes(subset=(label %in% c(mags_further_analysis$genome))),offset=0.17, size=4, align=T, linesize = 0.01) + scale_color_manual(name="Phylum",values=polychrome_27) + theme(legend.position="right", legend.spacing.y = unit(0,"mm")) + guides(
     size = guide_legend(
       override.aes = list(linetype = c("solid", "blank"), shape = c(NA, 16))
     )
-  )
-m5_combined_tree_w_ab_circle
+  ) 
+sed_tree_w_ab_circle
 ```
 
 Here I use cowplot to join all the figures together into a panel
@@ -165,11 +261,29 @@ Here I use cowplot to join all the figures together into a panel
 sediment_cartoon <- ggplot() + cowplot::draw_image("~/Documents/Sediments presentations + paper/Figures/Sediment_core_cartoon_v2.svg") + cowplot::panel_border(remove=T)
 #legend = cowplot::get_plot_component(m5_combined_tree_w_ab_circle, 'guide-box-bottom', return_all = TRUE)
 #rna_plus_legend <- cowplot::plot_grid(rna_16s_plot, legend, ncol=1, nrow=2, rel_heights = c(1.5, 0.5))
-bottom_row = cowplot::plot_grid(m5_combined_tree_w_ab_circle, mag_ab_plot, rel_widths = c(2, 1), label_size = 32,labels = c("D","E")) 
-top_row = cowplot::plot_grid(sediment_cartoon, nmds_plot, asv_heatmap, label_size = 32,nrow=1,labels=c("A","B","C"))
+bottom_row = cowplot::plot_grid(sed_tree_w_ab_circle + theme(legend.position="none") , cowplot::get_legend(sed_tree_w_ab_circle), mag_ab_plot, rel_widths = c(1,0.1,1),rel_heights = c(0.9, 0.5, 1), label_size = 32,labels = c("D","","E"), nrow=1) 
+top_row = cowplot::plot_grid(sediment_cartoon, nmds_plot, asv_heatmap, label_size = 32,nrow=1, rel_widths = c(0.8,0.7,1),labels=c("A","B","C"))
 panel_1 <- cowplot::plot_grid(top_row, bottom_row, nrow = 2, ncol=1)
 panel_1
 #ggplot2::ggsave("~/Documents/Sediments presentations + paper/Figures/panel_1_draft_2.svg", panel_1,width =2300,height=1300, units="px")# these render funky so I use the normal Rstudio save instead
 #ggplot2::ggsave("~/Documents/Sediments presentations + paper/Figures/panel_1_draft_2.png", panel_1,width =2300,height=1300, units="px")
+```
+```{r}
+rna_otu_counts <- myotutable %>%
+  select(OTU, ends_with("RNA")) %>%
+  pivot_longer(
+    cols = ends_with("RNA"),
+    names_to = "read_source",
+    values_to = "read_count",
+    names_pattern = "(?<=_)([0-9]+x?5?)(?=_RNA)"
+    ) %>%
+  rowwise() %>%
+  mutate(read_source = as.numeric(gsub("x",".",read_source)))
+
+rna_otus_bt_vs_nbt <- rna_otu_counts %>% mutate(bioturb = ifelse(read_source <= 6, "bt","nbt")) %>% group_by(OTU,bioturb) %>% summarise(sum_reads = sum(read_count)) %>% ungroup()
+rna_otus_bt_vs_nbt_w <- rna_otus_bt_vs_nbt %>% pivot_wider(id_cols = OTU, names_from = "bioturb", values_from = "sum_reads")
+```
+```{r}
+rna_otus_bt_vs_nbt_w %>% mutate(present_bt = bt >= 10, present_nbt = nbt >= 10) %>% group_by(present_bt, present_nbt) %>% summarise(n = n())
 ```
 
