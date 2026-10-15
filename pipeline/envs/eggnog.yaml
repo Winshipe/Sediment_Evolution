@@ -1,0 +1,6 @@
+name: sediment_evolution_eggnog
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - eggnog-mapper

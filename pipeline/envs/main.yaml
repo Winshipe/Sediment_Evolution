@@ -1,0 +1,14 @@
+# Tools for the read mapping / InStrain pipeline. Versions are not pinned because the
+# original environment file was not kept.
+name: sediment_evolution_main
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.9
+  - fastp
+  - bwa
+  - samtools
+  - prodigal
+  - mmseqs2
+  - instrain

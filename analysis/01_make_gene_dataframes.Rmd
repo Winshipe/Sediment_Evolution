@@ -1,0 +1,389 @@
+---
+title: "01 - Build the per-gene population genetics + annotation tables"
+output: html_document
+date: "2025-06-19"
+---
+
+This notebook turns the InStrain output for every MAG / read-depth combination into
+one table per site with per-gene population genetic statistics (πN/πS, θN/θS, pN/pS)
+joined to functional annotations (UniRef90, PHROGs), BUSCO membership and MAG lifestyle.
+
+Outputs (written to `data/intermediate/`, these are the inputs of `03_figures_selection.Rmd`):
+
+* `MAG_popgen_plus_anno_M5.tsv.gz`, `MAG_popgen_plus_anno_M1.tsv.gz`
+* `MAG_table_2.tsv` (MAG quality / taxonomy table)
+
+Side outputs go to `results/tables/`.
+
+**Note:** pre-computed copies of all outputs are already shipped in `data/intermediate/`,
+so you only need to run this notebook if you want to regenerate them. It needs the raw
+MMseqs2 UniRef90 hit tables (`data/annotations/uniref_hits_M5_3.tsv` and
+`uniref_hits_M1_3.tsv`), which are produced by the `mmseqs_uniref` rule in
+`pipeline/Snakefile` and are not included in this repository.
+
+Naming conventions used throughout:
+
+* `M1` / `M5` – sampling site
+* `M5_3` – MAG set assembled from site M5 at 3 cm below sea floor (cmbsf)
+* `reads_source` – the depth (cmbsf) the *reads* were taken from. "depth" always means
+  sediment depth, never depth of coverage (that is called "coverage").
+
+```{r setup}
+library(tidyverse)
+library(here) # here() builds paths from the project root, wherever the project is unpacked
+
+data_dir <- here("data")
+table_dir <- here("results", "tables")
+dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Fail early, with a useful message, if an input that is not shipped is missing
+required_inputs <- file.path(data_dir, c(
+  "annotations/uniref_hits_M5_3.tsv",
+  "annotations/uniref_hits_M1_3.tsv"
+))
+missing_inputs <- required_inputs[!file.exists(required_inputs)]
+if (length(missing_inputs) > 0) {
+  stop("Missing input file(s):\n  ", paste(missing_inputs, collapse = "\n  "),
+       "\nThese are produced by the `mmseqs_uniref` rule in pipeline/Snakefile (see README.md).")
+}
+```
+
+## Per-gene πN/πS, θN/θS and pN/pS — site M5
+
+`raw_genes_filtered_w_theta_hat_*` is the InStrain gene_info output for every read depth,
+with the number of synonymous (`Ls`) and non-synonymous (`Ln`) sites of every gene added.
+Here we go back to the per-SNV InStrain output to compute the per-gene statistics.
+
+```{r}
+rgwt_m5 <- read_delim(file.path(data_dir, "intermediate/raw_genes_filtered_w_theta_hat_M5_3.tsv.gz"))
+all_depths_pi_n_pi_s_M5 = data.frame(data.frame(matrix(ncol = 21, nrow = 0)))
+colnames(all_depths_pi_n_pi_s_M5) <- c("gene","MAG","start","reads_source","gene_length","Ls","Ln","coverage","sites_N","sites_S","n_variants_N","n_variants_S","pi_N","pi_S","theta_N","theta_S","pi_NS","theta_NS","p_N","p_S","p_NS")
+
+# one iteration per read depth (cmbsf); 5 cm is not used for M5
+for( i in c(1, 3, 7, 10, 25)){
+  temp_snvs <- read_delim(file.path(data_dir, paste0("all_depths_M5_3/IS_raw_M5_3_",i,"_SNVs.tsv.gz")))
+
+  # attach gene length, Ls/Ln and coverage to every SNV
+  temp_snvs <- left_join(temp_snvs, rgwt_m5  %>% filter(reads_source == i) %>% select(gene,MAG,start, gene_length, Ls, Ln, coverage) )
+
+  # nucleotide diversity at each SNV position: 1 - sum(allele frequency^2)
+  temp_snvs <- temp_snvs %>%
+    mutate(
+      position_pi =  1 - ((A / position_coverage)**2 + (C / position_coverage)**2 + (T / position_coverage)**2 + (G / position_coverage)**2)
+    )
+  # summarise per gene, separately for non-synonymous (N) and synonymous (S) SNVs
+  temp_genes_plus_p_pi <- temp_snvs %>%
+    group_by(gene,MAG,start, mutation_type, gene_length, Ls, Ln, coverage) %>%
+    summarise(
+      mean_SNV_pi = mean(position_pi),
+      sites = n(),
+      n_variants = sum(allele_count) - n() # allele_count = 2 -> reference + variant
+    ) %>% filter((mutation_type == "N") | (mutation_type == "S")) %>%
+    pivot_wider(
+      id_cols = c(gene, start, MAG, gene_length, Ls, Ln, coverage),
+      names_from=mutation_type,
+      values_from = c(mean_SNV_pi, sites, n_variants)
+      )
+  # normalise by the number of N / S sites in the gene.
+  # theta-hat is Watterson's estimator with ln(coverage) standing in for the harmonic number
+  temp_genes_plus_pi <- temp_genes_plus_p_pi %>%
+    mutate(
+      pi_N = (mean_SNV_pi_N / Ln),
+      pi_S = (mean_SNV_pi_S / Ls),
+      theta_N = (sites_N / (Ln * log(coverage))),
+      theta_S = (sites_S / (Ls * log(coverage))),
+      p_N = (n_variants_N / Ln),
+      p_S = (n_variants_S / Ls)
+    ) %>%
+    mutate(
+      pi_NS = pi_N / pi_S,
+      theta_NS = theta_N / theta_S,
+      p_NS = p_N / p_S #hahaha
+    ) %>% select(-mean_SNV_pi_N, -mean_SNV_pi_S) %>% #intermediary values not needed in final
+    mutate(reads_source = i)
+  all_depths_pi_n_pi_s_M5 <- rbind(all_depths_pi_n_pi_s_M5, temp_genes_plus_pi)
+}
+all_depths_pi_n_pi_s_M5 %>% write_delim(file.path(table_dir, "pop_gen_gene_stats_M5_3.tsv"),delim="\t")
+
+```
+
+## Per-gene πN/πS, θN/θS and pN/pS — site M1
+
+Identical to the M5 chunk above, but M1 also has reads from 5 cmbsf.
+
+```{r}
+rgwt_m1 <- read_delim(file.path(data_dir, "intermediate/raw_genes_filtered_w_theta_hat_M1_3.tsv.gz"))
+all_depths_pi_n_pi_s_M1 = data.frame(data.frame(matrix(ncol = 21, nrow = 0)))
+colnames(all_depths_pi_n_pi_s_M1) <- c("gene","MAG","start","reads_source","gene_length","Ls","Ln","coverage","sites_N","sites_S","n_variants_N","n_variants_S","pi_N","pi_S","theta_N","theta_S","pi_NS","theta_NS","p_N","p_S","p_NS")
+
+for( i in c(1, 3, 5, 7, 10, 25)){
+  temp_snvs <- read_delim(file.path(data_dir, paste0("all_depths_M1_3/IS_raw_M1_3_",i,"_SNVs.tsv.gz")))
+
+  temp_snvs <- left_join(temp_snvs, rgwt_m1  %>% filter(reads_source == i) %>% select(gene,MAG, start, gene_length, Ls, Ln, coverage) )
+
+  temp_snvs <- temp_snvs %>%
+    mutate(
+      position_pi =  1 - ((A / position_coverage)**2 + (C / position_coverage)**2 + (T / position_coverage)**2 + (G / position_coverage)**2)
+    )
+  temp_genes_plus_p_pi <- temp_snvs %>%
+    group_by(gene,MAG,start, mutation_type, gene_length, Ls, Ln, coverage) %>%
+    summarise(
+      mean_SNV_pi = mean(position_pi),
+      sites = n(),
+      n_variants = sum(allele_count) - n() # allele_count = 2 -> reference + variant
+    ) %>% filter((mutation_type == "N") | (mutation_type == "S")) %>%
+    pivot_wider(
+      id_cols = c(gene,start, MAG, gene_length, Ls, Ln, coverage),
+      names_from=mutation_type,
+      values_from = c(mean_SNV_pi, sites, n_variants)
+      )
+  temp_genes_plus_pi <- temp_genes_plus_p_pi %>%
+    mutate(
+      pi_N = (mean_SNV_pi_N / Ln),
+      pi_S = (mean_SNV_pi_S / Ls),
+      theta_N = (sites_N / (Ln * log(coverage))),
+      theta_S = (sites_S / (Ls * log(coverage))),
+      p_N = (n_variants_N / Ln),
+      p_S = (n_variants_S / Ls)
+    ) %>%
+    mutate(
+      pi_NS = pi_N / pi_S,
+      theta_NS = theta_N / theta_S,
+      p_NS = p_N / p_S #hahaha
+    ) %>% select(-mean_SNV_pi_N, -mean_SNV_pi_S) %>% #intermediary values not needed in final
+    mutate(reads_source = i)
+  all_depths_pi_n_pi_s_M1 <- rbind(all_depths_pi_n_pi_s_M1, temp_genes_plus_pi)
+}
+all_depths_pi_n_pi_s_M1 %>% write_delim(file.path(table_dir, "pop_gen_gene_stats_M1_3.tsv"),delim="\t")
+
+```
+
+## Functional annotation — site M5
+
+UniRef90 hits come from `mmseqs easy-search` (BLAST tab format, no header). Only the first
+(best) hit per gene is kept. The list of UniRef IDs written out here was uploaded to the
+UniProt ID-mapping service to get `uniref_annotations_M5_3.tsv.gz`.
+
+```{r}
+cnames = c("gene","From", "pident","length","mismatch","gapopen","qstart","qend","sstart","send","evalue","bitscore")
+uniref_hits <- read_delim(file.path(data_dir, "annotations/uniref_hits_M5_3.tsv"),delim="\t",col_names = cnames) %>% group_by(gene) %>% slice_head(n=1) %>% ungroup()
+uniref_hits %>% select(From) %>% write_delim(file.path(table_dir, "uniref_hits_filtered_ids_M5_3.txt"),delim="\t")
+
+uniref_ids <- read_delim(file.path(data_dir, "annotations/uniref_annotations_M5_3.tsv.gz"))
+gene_annotations_M5 <- left_join(uniref_hits %>% select(gene, From, pident), uniref_ids)
+```
+
+PHROGs is a phage-specific protein database; keep the lowest e-value hit per gene.
+
+```{r}
+phrog_hits <- read_delim(file.path(data_dir, "annotations/phrog_hits_M5_3.tsv.gz"),col_names = cnames) %>% rename(key = From) #phrog is a phage specific db
+phrog_anno <- read_delim(file.path(data_dir, "annotations/phrog_table.tsv.gz"))
+phrogs <- left_join(phrog_hits %>% select(gene, key, pident, evalue), phrog_anno) %>% select(-key, -Location) %>% filter(!is.na(Entry))
+phrogs %>% write_delim(file.path(table_dir, "phrog_annotations_M5_3.tsv"),delim="\t")
+phrog_best <- phrogs %>% rename(protein = `Protein names`, Phrog = Entry, phrog_pident = pident, phrog_eval = evalue, phrog_Accession = Accesssion ) %>% group_by(gene) %>%  slice_min(phrog_eval, n = 1, with_ties = F) %>% ungroup()
+```
+
+Length distribution of the UniRef90 hits (in nt); the red lines mark the 500–2000 nt window
+used below for genes without a UniRef hit.
+
+```{r}
+gene_annotations_M5 %>% ggplot(aes(x=(Length*3))) + geom_histogram() + xlim(0,5000) + geom_vline(xintercept=500, linetype="dashed", color="red") + geom_vline(xintercept=2000, linetype="dashed", color="red")
+```
+```{r}
+popstat_all_anno_M5 <- left_join(left_join(all_depths_pi_n_pi_s_M5, gene_annotations_M5), phrog_best, by = join_by(gene), suffix = c("_uniref","_phrog"))
+head(popstat_all_anno_M5)
+```
+
+How many genes does the length filter keep? (all genes / genes within ±25 % of their UniRef
+hit length / the same plus un-annotated genes of 500–2000 nt)
+
+```{r}
+length((popstat_all_anno_M5 %>% group_by(gene) %>% slice_head(n=1) %>% ungroup())$gene)
+```
+
+```{r}
+length((popstat_all_anno_M5 %>% group_by(gene) %>% slice_head(n=1) %>% ungroup() %>% filter(((gene_length  >= (Length * 3 * 0.75)) & (gene_length <= (Length * 3 * 1.25)))))$gene)
+```
+
+
+```{r}
+length((popstat_all_anno_M5 %>% group_by(gene) %>% slice_head(n=1) %>% ungroup() %>% filter(((gene_length  >= (Length * 3 * 0.75)) & (gene_length <= (Length * 3 * 1.25))) | (is.na(Length) & ((gene_length > 500) & (gene_length < 2000)))))$gene)
+```
+
+Keep genes whose predicted length is within ±25 % of their UniRef hit or, if they have no
+hit, that are 500–2000 nt long. This removes truncated / fused gene predictions.
+
+```{r}
+popstat_all_anno_filtered_M5 <- popstat_all_anno_M5 %>% filter(((gene_length  >= (Length * 3 * 0.75)) & (gene_length <= (Length * 3 * 1.25))) | (is.na(Length) & ((gene_length > 500) & (gene_length < 2000))))
+```
+
+MAG lifestyle (surface specialist / generalist / subsurface specialist) and a short phylogeny label.
+
+```{r}
+lifestyle_plus_phylo_m5 <- read_delim(file.path(data_dir, "mags/lifestyles_M5_3.tsv")) %>% mutate(MAG = paste0(genome, ".filtered.fa"))
+```
+
+Flag BUSCO (single-copy core) genes and write the final M5 table.
+
+```{r}
+busco_gene_ids_M5 <- read_delim(file.path(data_dir, "annotations/busco_gene_ids_M5_3.txt"),delim=",")
+popstat_all_anno_filtered_M5 <- popstat_all_anno_filtered_M5 %>% mutate(is_busco = gene %in% busco_gene_ids_M5$gene)
+left_join(popstat_all_anno_filtered_M5,lifestyle_plus_phylo_m5)  %>% group_by(gene, reads_source) %>% slice_head(n=1) %>% ungroup() %>% write_delim(file.path(data_dir, "intermediate/MAG_popgen_plus_anno_M5.tsv.gz"),delim="\t")
+```
+
+
+
+## Functional annotation — site M1
+
+Same steps as for M5.
+
+```{r}
+cnames = c("gene","From", "pident","length","mismatch","gapopen","qstart","qend","sstart","send","evalue","bitscore")
+uniref_hits_M1 <- read_delim(file.path(data_dir, "annotations/uniref_hits_M1_3.tsv"),delim="\t",col_names = cnames) %>% group_by(gene) %>% slice_head(n=1) %>% ungroup()
+uniref_hits_M1 %>% select(From) %>% write_delim(file.path(table_dir, "uniref_hits_filtered_ids_M1_3.txt"),delim="\t")
+
+uniref_ids_M1 <- read_delim(file.path(data_dir, "annotations/uniref_annotations_M1_3.tsv.gz"))
+gene_annotations_M1 <- left_join(uniref_hits_M1 %>% select(gene, From, pident), uniref_ids_M1)
+```
+```{r}
+phrog_hits_M1 <- read_delim(file.path(data_dir, "annotations/phrog_hits_M1_3.tsv.gz"),col_names = cnames) %>% rename(key = From)
+phrog_anno <- read_delim(file.path(data_dir, "annotations/phrog_table.tsv.gz"))
+phrogs_M1 <- left_join(phrog_hits_M1 %>% select(gene, key, pident, evalue), phrog_anno) %>% select(-key, -Location) %>% filter(!is.na(Entry))
+phrogs_M1 %>% write_delim(file.path(table_dir, "phrog_annotations_M1_3.tsv"),delim="\t")
+phrog_best_M1 <- phrogs_M1 %>% rename(protein = `Protein names`, Phrog = Entry, phrog_pident = pident, phrog_eval = evalue, phrog_Accession = Accesssion ) %>% group_by(gene) %>%  slice_min(phrog_eval, n = 1, with_ties = F) %>% ungroup()
+```
+```{r}
+popstat_all_anno_M1 <- left_join(left_join(all_depths_pi_n_pi_s_M1, gene_annotations_M1), phrog_best_M1, by = join_by(gene), suffix = c("_uniref","_phrog"))
+head(popstat_all_anno_M1)
+```
+
+```{r}
+tail(popstat_all_anno_M1)
+```
+
+```{r}
+popstat_all_anno_M1_filtered <- popstat_all_anno_M1 %>% filter(((gene_length  >= (Length * 3 * 0.75)) & (gene_length <= (Length * 3 * 1.25))) | (is.na(Length) & ((gene_length > 500) & (gene_length < 2000))))
+```
+
+In the M1 InStrain run the MAG names carry a `refs/` prefix, so it is added here as well.
+
+```{r}
+lifestyle_plus_phylo_m1 <- read_delim(file.path(data_dir, "mags/lifestyles_M1_3.tsv")) %>% mutate(MAG = paste0("refs/",genome, ".filtered.fa"))
+head(lifestyle_plus_phylo_m1)
+```
+
+```{r}
+busco_gene_ids_M1 <- read_delim(file.path(data_dir, "annotations/busco_gene_ids_M1_3.txt"),delim=",",col_names = c("gene"))
+popstat_all_anno_M1_filtered <- popstat_all_anno_M1_filtered %>% mutate(is_busco = gene %in% busco_gene_ids_M1$gene)
+left_join(popstat_all_anno_M1_filtered,lifestyle_plus_phylo_m1) %>% group_by(gene, reads_source) %>% slice_head(n=1) %>% ungroup() %>% write_delim(file.path(data_dir, "intermediate/MAG_popgen_plus_anno_M1.tsv.gz"),delim="\t")
+
+```
+
+## Neutral range of θN/θS (bootstrap)
+
+The "Purifying" / "Neutral" / "Positive" cut-offs used in `03_figures_selection.Rmd` come
+from this section. For genes with θN/θS close to 1, the SNV counts are resampled (Poisson)
+1000 times to see how much θN/θS varies from sampling noise alone; the neutral range is
+then mean ± 3 SD.
+
+```{r}
+# returns c(mean, sd) of the bootstrapped theta_N / theta_S for one gene
+bootstrap_gene <- function(snv_s_count, snv_n_count, ln, ls, covg){
+  nrep_ = 1000
+  pns = rep(NA, nrep_)
+  for(i in seq(1:(1+nrep_))){
+    s = rpois(1, snv_s_count)
+    n = rpois(1, snv_n_count)
+    p_n = n / (ln * log(covg))
+    p_s = s / (ls * log(covg))
+    pnps = p_n / p_s
+    pns[i] = pnps
+  }
+  return(c(mean(pns), sd(pns)))
+}
+bootstrap_gene_v <- Vectorize(bootstrap_gene)
+```
+```{r}
+output <- popstat_all_anno_filtered_M5 %>% filter((theta_NS >= 0.9) & (theta_NS <= 1.1)) %>% rowwise() %>% mutate(bs_mean = bootstrap_gene(sites_S, sites_N, Ln, Ls, coverage)[1], bs_std = bootstrap_gene(sites_S, sites_N, Ln, Ls, coverage)[2]) %>% ungroup()
+```
+```{r}
+output %>% ungroup() %>% filter(!is.infinite(bs_mean)) %>% summarise(mean_of_means = mean(bs_mean, na.rm=T), sd(bs_mean,na.rm=T))
+```
+
+Upper and lower limits of the neutral range (mean ± 3 SD). The numbers are copied from the
+output above, which changes slightly from run to run because the bootstrap is random.
+
+```{r}
+1.114 + 3*0.0894
+```
+```{r}
+1.114 - 3*0.0894
+```
+
+
+```{r}
+data.frame(output) %>% ggplot(aes(x=bs_mean)) + geom_histogram()
+```
+
+```{r}
+1.12 - 3* 0.094
+```
+```{r}
+1.12 + 3* 0.094
+```
+
+
+
+## MAG summary table
+
+Combine taxonomy/BUSCO (`MAG_table_further_analysis.tsv`) with CheckM2 quality statistics
+and keep only the MAGs that made it into the gene tables above.
+
+```{r}
+mag_table <- read_delim(file.path(data_dir, "mags/MAG_table_further_analysis.tsv")) #this didn't have CheckM2 data for M1_3 so I add that in in subsq. steps
+head(mag_table)
+
+```
+```{r}
+check_m2_m5_3 <- read_delim(file.path(data_dir, "mags/checkm2_quality_report_M5_3.tsv"))
+head(check_m2_m5_3)
+```
+```{r}
+check_m2_m1_3 <- read_delim(file.path(data_dir, "mags/checkm2_quality_report_M1_3.tsv"))
+check_m2 <- rbind(check_m2_m5_3, check_m2_m1_3) %>% mutate(MAG = paste0(Name, ".fa")) %>% select(-Name)
+```
+
+
+
+```{r}
+mag_table2 <- left_join(
+    mag_table %>%
+    mutate(`Site + Depth` = paste0(Site, " ",`Assembly Depth`)) %>%
+    select(
+      MAG, Domain, Phylum, Class, Order, Family, Genus, Species, `Site + Depth`,
+      `BUSCO Completeness`, Duplications,
+      )
+    , check_m2 %>% select(MAG, Completeness, Contamination, Genome_Size, Total_Contigs, Max_Contig_Length, Contig_N50, GC_Content)
+  ) %>%
+  rename(
+      `BUSCO Contamination` = Duplications,
+      `CheckM2 Completeness`= Completeness,
+      `CheckM2 Contamination`= Contamination,
+      `Genome size` = Genome_Size,
+      `Total Contigs` = Total_Contigs,
+      `Max contig length` = Max_Contig_Length,
+      N50 = Contig_N50
+      ) %>%
+  mutate(`GC %` = GC_Content * 100) %>%
+  select(-GC_Content) %>%
+  # human readable sizes (Mb / Kb)
+  mutate(`Genome size` = ifelse(`Genome size` > 1E6, paste0(round(`Genome size`/1E6, digits=2),"Mb"),paste0(round(`Genome size`/1000),"Kb"))) %>%
+  mutate(`Max contig length` = paste0(`Max contig length` = round(`Max contig length`/1000),"Kb")) %>%
+  mutate(N50 = paste0(N50 = round(N50 / 1000),"Kb")) %>%
+  filter(!is.na(MAG)) %>%
+  # keep only MAGs that are in the gene tables (M1 MAG names carry a refs/ prefix there)
+  filter((paste0("refs/",MAG) %in% popstat_all_anno_M1_filtered$MAG) | (MAG %in% popstat_all_anno_filtered_M5$MAG))
+mag_table2 %>%
+  write_delim(file.path(data_dir, "intermediate/MAG_table_2.tsv"),delim="\t")
+
+```
